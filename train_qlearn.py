@@ -6,7 +6,7 @@ from algorithms.q_learning import QLearningAgent
 
 
 def train_qlearning(
-    num_episodes: int = 50000,
+    num_episodes: int = 2,
     alpha: float = 0.1,
     gamma: float = 0.99,
     epsilon_start: float = 0.2,

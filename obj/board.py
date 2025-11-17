@@ -47,7 +47,14 @@ class Board:
                     owner_counts[owner] = owner_counts.get(owner, 0) + 1
         return owner_counts
     
-    
+    def get_total_stone_count(self) -> int:
+        total = 0
+        for row in self.grid:
+            for cell in row:
+                if cell is not Field.EMPTY:
+                    total += 1
+        return total
+
     def _resolvePlacementEffects(self, row, col):
         """Resolve captures against N/S/E/W neighbours after placing a stone."""
         placed = self.grid[row][col]

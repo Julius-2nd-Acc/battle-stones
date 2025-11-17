@@ -319,7 +319,8 @@ class SkystonesEnv(gym.Env):
             for r in range(self.rows)
             for c in range(self.cols)
         )
-        return no_player_stones or no_empty_fields
+        return no_player_stones or no_empty_fields 
+    
 
     def _final_outcome_reward(self) -> float:
         """

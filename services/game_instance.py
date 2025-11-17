@@ -155,6 +155,15 @@ class GameInstance:
         else:
             print("Invalid move. Try again.")
             
+    def placed_stone_count(self):
+        count = 0
+        for r in range(self.board.rows):
+            for c in range(self.board.cols):
+                cell = self.board.getField(r, c)
+                if cell is not Board.EMPTY:
+                    count += 1
+        return count
+            
     def check_game_over(self):
         no_player_stones = all(len(player.stones) == 0 for player in self.players)
         no_empty_fields = not any(

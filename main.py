@@ -83,6 +83,7 @@ def _describe_action(env: SkystonesEnv, action: int, player_idx: int, controller
     """
     slot, row, col = env._decode_action(action)
     stone = env._get_stone_for_slot(player_idx, slot)
+    
 
     if stone is not None and hasattr(stone, "get_representation"):
         stone_repr = stone.get_representation()
@@ -90,6 +91,8 @@ def _describe_action(env: SkystonesEnv, action: int, player_idx: int, controller
         stone_repr = stone.name
     else:
         stone_repr = "None (empty slot)"
+    
+    
 
     return (
         f"Player {player_idx} [{controller_label}] plays "
@@ -121,6 +124,7 @@ def play_one_episode(env, agent_p0=None, agent_p1=None, render=False):
 
     while not done:
         current_player = env.current_player_idx
+        
 
         if current_player == 0:
             controller = agent_p0
@@ -134,6 +138,7 @@ def play_one_episode(env, agent_p0=None, agent_p1=None, render=False):
         # Build description BEFORE step mutates the state
         if render:
             move_desc = _describe_action(env, action, current_player, controller_label)
+    
 
         next_obs, reward, terminated, truncated, info = env.step(action)
 
@@ -151,10 +156,11 @@ def play_one_episode(env, agent_p0=None, agent_p1=None, render=False):
             print(f"\nMove {move_number}:")
             print(move_desc)
             env.render()
+    
 
         obs = next_obs
         total_reward_p0 += reward
-        done = terminated or truncated
+        done = terminated or truncated or env.game.board.get_total_stone_count() == 8
         move_number += 1
 
 
