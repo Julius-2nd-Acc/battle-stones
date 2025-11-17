@@ -1,5 +1,3 @@
-# algorithms/q_learning_agent.py
-
 import random
 import pickle
 from collections import defaultdict

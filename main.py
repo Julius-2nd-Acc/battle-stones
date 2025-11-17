@@ -1,5 +1,3 @@
-# play_matches.py
-
 import random
 from pathlib import Path
 
@@ -79,6 +77,28 @@ def _choose_action_for_player(agent, env: SkystonesEnv, obs, player_idx: int) ->
     return sample_random_action(env, player_idx=player_idx)
 
 
+def _describe_action(env: SkystonesEnv, action: int, player_idx: int, controller_label: str) -> str:
+    """
+    Turn an action index into a human-readable description:
+    which slot, which stone, and which board cell.
+    """
+    # Use env's own decoder
+    slot, row, col = env._decode_action(action)
+
+    stone = env._get_stone_for_slot(player_idx, slot)
+    if stone is not None and hasattr(stone, "get_representation"):
+        stone_repr = stone.get_representation()
+    elif stone is not None and hasattr(stone, "name"):
+        stone_repr = stone.name
+    else:
+        stone_repr = "None"
+
+    return (
+        f"Player {player_idx} [{controller_label}] plays "
+        f"slot {slot}, stone {stone_repr}, to (row={row}, col={col})"
+    )
+
+
 def play_one_episode(env, agent_p0=None, agent_p1=None, render=False):
     """
     Play a single game.
@@ -90,6 +110,8 @@ def play_one_episode(env, agent_p0=None, agent_p1=None, render=False):
       - The agent that made the illegal move keeps the turn.
       - The illegal move does NOT end the game, and its reward is ignored.
 
+    When render=True, prints each move with a description and then shows the board.
+
     Returns:
         winner: 0 (Player 0), 1 (Player 1), or None for draw
         total_reward_p0: sum of rewards from Player 0 perspective over the episode
@@ -97,36 +119,57 @@ def play_one_episode(env, agent_p0=None, agent_p1=None, render=False):
     obs, info = env.reset()
     done = False
     total_reward_p0 = 0.0
+    move_number = 1
 
     while not done:
         current_player = env.current_player_idx
 
-        # Decide which controller to use
+        # Decide which controller to use & label
         if current_player == 0:
+            controller = agent_p0
+            controller_label = (
+                type(agent_p0).__name__ if agent_p0 is not None else "Random"
+            )
             action = _choose_action_for_player(agent_p0, env, obs, player_idx=0)
         else:  # current_player == 1
+            controller = agent_p1
+            controller_label = (
+                type(agent_p1).__name__ if agent_p1 is not None else "Random"
+            )
             action = _choose_action_for_player(agent_p1, env, obs, player_idx=1)
 
         next_obs, reward, terminated, truncated, info = env.step(action)
 
-        # If the move was illegal, ignore its reward & termination and let the
-        # SAME player try again on the next loop iteration.
+        # Illegal move handling
         if info.get("illegal_move", False):
             if render:
-                print(f"Player {current_player} made an illegal move, retrying...")
+                print(f"\nMove {move_number}:")
+                print(
+                    _describe_action(
+                        env, action, current_player, controller_label
+                    )
+                )
+                print(f"→ ILLEGAL move by Player {current_player}, retrying...")
                 env.render()
-            # Do NOT add reward, do NOT mark done, do NOT change turn
-            # env.step() did not change current_player_idx or the board for illegal moves.
+            # Do NOT add reward, do NOT mark done, same player moves again
             obs = next_obs
+            move_number += 1
             continue
 
-        # Legal move: update reward and potentially end the episode
+        # Legal move
+        if render:
+            print(f"\nMove {move_number}:")
+            print(
+                _describe_action(
+                    env, action, current_player, controller_label
+                )
+            )
+            env.render()
+
         obs = next_obs
         total_reward_p0 += reward
         done = terminated or truncated
-
-        if render:
-            env.render()
+        move_number += 1
 
     # Determine winner from final board state
     owner_counts = env.game.board.get_current_stone_count()
@@ -152,7 +195,6 @@ def run_mc_vs_random(num_episodes=50, render=False):
     draws = 0
 
     for ep in range(1, num_episodes + 1):
-        # MC is always Player 0 here, random is Player 1
         winner, total_reward_p0 = play_one_episode(
             env, agent_p0=mc_agent, agent_p1=None, render=render
         )
@@ -184,7 +226,6 @@ def run_q_vs_random(num_episodes=50, render=False):
     draws = 0
 
     for ep in range(1, num_episodes + 1):
-        # Q-learning is always Player 0 here, random is Player 1
         winner, total_reward_p0 = play_one_episode(
             env, agent_p0=q_agent, agent_p1=None, render=render
         )
@@ -242,7 +283,7 @@ def run_mc_vs_q(num_episodes=50, render=False):
 
 if __name__ == "__main__":
     # Choose which matchup you want to run.
-    # Set render=True to print the board every move.
-    # run_mc_vs_random(num_episodes=20, render=False)
-    # run_q_vs_random(num_episodes=20, render=False)
-    run_mc_vs_q(num_episodes=20, render=False)
+    # Set render=True to print the board and move descriptions.
+    run_q_vs_random(num_episodes=5, render=True)
+    # run_mc_vs_random(num_episodes=5, render=True)
+    # run_mc_vs_q(num_episodes=5, render=True)

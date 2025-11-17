@@ -25,8 +25,8 @@ class GameInstance:
         self.board = board
 
     def setup_players(self):
-        self.add_player(Player("Player 1", PlayerType.HUMAN))
-        self.add_player(Player("Player 2", PlayerType.AI))
+        self.add_player(Player("B", PlayerType.HUMAN))
+        self.add_player(Player("R", PlayerType.AI))
         for player in self.players:
             self.generate_stones_for_player(player)
         # record initial stone slot ordering and pad to uniform length
