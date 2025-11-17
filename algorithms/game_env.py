@@ -1,240 +1,358 @@
-import json
-import random
-from typing import Any, Tuple
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
 
+from obj.board import Field
 from services.game_instance import GameInstance
 
 
-class GameEnv:
-    """A small Gym-like wrapper around GameInstance for training.
+class SkystonesEnv(gym.Env):
+    """
+    Gymnasium wrapper around your Skystones-like GameInstance.
 
-    Action encoding (fixed-size):
-        action_id = stone_slot * (rows*cols) + (row*cols + col)
-
-    stone_slot refers to the initial ordering of stones given to each player on setup.
-    If a stone in that slot has already been played, the action is invalid.
+    - Two players (index 0 and 1)
+    - Single policy controls both players (self-play).
+    - Action = slot * (rows * cols) + cell_index.
+    - Reward = final outcome (win/loss/draw) + per-capture shaping.
     """
 
-    def __init__(self, game_factory=GameInstance, rows=3, cols=3, max_stones=4, train_player_idx=0):
-        self.game_factory = game_factory
-        self.rows = rows
-        self.cols = cols
-        self.max_stones = max_stones
-        self.n_actions = max_stones * rows * cols
-        self.train_player_idx = train_player_idx
+    metadata = {"render_modes": ["human"], "render_fps": 30}
 
-        self.game: GameInstance | None = None
-        # mapping player -> list of initial stone names (slot mapping)
-        self.initial_slots = {}
+    def __init__(self, render_mode=None, capture_reward: float = 1.0):
+        super().__init__()
+        self.render_mode = render_mode
+        self.capture_reward = capture_reward
 
-    def reset(self) -> Any:
-        self.game = self.game_factory()
-        # existing API: setup_game() creates board and players and generates stones
+        # Use a temporary game to infer board and stone info
+        tmp_game = GameInstance()
+        tmp_game.setup_game(col=3, row=3)
+        self.rows = tmp_game.board.rows
+        self.cols = tmp_game.board.cols
+        self.max_slots = max(len(slots) for slots in tmp_game.initial_slots.values())
+
+        # Build a mapping from stone (n,s,e,w) -> type_id
+        self.attr_to_type = {}
+        type_id = 0
+        for p_idx, slot_names in tmp_game.initial_slots.items():
+            player = tmp_game.players[p_idx]
+            for name in slot_names:
+                if name is None:
+                    continue
+                stone_obj = next((s for s in player.stones if s.name == name), None)
+                if stone_obj is None:
+                    continue
+                attrs = stone_obj.get_Attributes()  # (n,s,e,w)
+                if attrs not in self.attr_to_type:
+                    self.attr_to_type[attrs] = type_id
+                    type_id += 1
+        self.num_types = type_id
+
+        # Underlying game (created on reset)
+        self.game = None
+        self.current_player_idx = 0
+
+        # Action: choose slot + cell
+        self.action_space = spaces.Discrete(self.max_slots * self.rows * self.cols)
+
+        # Observation:
+        # - board_owner: 0 empty, 1 player0, 2 player1
+        # - board_type: -1 empty, otherwise 0..num_types-1
+        # - hand_types: -1 empty slot, otherwise 0..num_types-1
+        # - to_move: which player (0 or 1)
+        self.observation_space = spaces.Dict(
+            {
+                "board_owner": spaces.Box(
+                    low=0,
+                    high=2,
+                    shape=(self.rows, self.cols),
+                    dtype=np.int8,
+                ),
+                "board_type": spaces.Box(
+                    low=-1,
+                    high=self.num_types - 1,
+                    shape=(self.rows, self.cols),
+                    dtype=np.int8,
+                ),
+                "hand_types": spaces.Box(
+                    low=-1,
+                    high=self.num_types - 1,
+                    shape=(2, self.max_slots),
+                    dtype=np.int8,
+                ),
+                "to_move": spaces.Discrete(2),
+            }
+        )
+
+    # ------------------------------------------------------------------ #
+    # Gymnasium API
+    # ------------------------------------------------------------------ #
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+
+        self.game = GameInstance()
         self.game.setup_game(col=self.cols, row=self.rows)
+        self.current_player_idx = 0
 
-        # remember initial stone slots by name for each player
-        self.initial_slots = {}
-        for i, p in enumerate(self.game.players):
-            names = [s.name for s in p.stones]
-            # pad to max_stones
-            names += [None] * max(0, self.max_stones - len(names))
-            self.initial_slots[i] = names[: self.max_stones]
+        obs = self._build_observation()
+        info = {}
+        return obs, info
 
-        return self._get_state()
+    def step(self, action: int):
+        """
+        One environment step = one move by current_player_idx.
 
-    def step(self, action_id: int) -> Tuple[Any, float, bool, dict]:
-        # decode action
-        stone_slot = action_id // (self.rows * self.cols)
-        cell_idx = action_id % (self.rows * self.cols)
-        r = cell_idx // self.cols
-        c = cell_idx % self.cols
+        Reward components (from Player 0's perspective):
+          - capture/loss shaping each move
+          - final win/loss/draw reward when game ends
 
-        train_player = self.game.players[self.train_player_idx]
+        Invalid action → immediate loss for current player.
+        """
+        assert self.game is not None, "Call reset() before step()."
 
-        info = {"invalid": False}
+        player = self.game.players[self.current_player_idx]
 
-        # map slot -> stone object (by name)
-        slot_name = self.initial_slots[self.train_player_idx][stone_slot] if stone_slot < len(self.initial_slots[self.train_player_idx]) else None
-        if slot_name is None:
-            # invalid slot
-            info["invalid"] = True
-            return self._get_state(), -0.1, False, info
+        # Decode action
+        slot, row, col = self._decode_action(action)
 
-        # find the stone object with that name in current player's stones
-        chosen_stone = None
-        for s in train_player.stones:
-            if s.name == slot_name:
-                chosen_stone = s
-                break
-
-        if chosen_stone is None:
-            # stone already played -> invalid
-            info["invalid"] = True
-            return self._get_state(), -0.1, False, info
-
-        if not self.game.board.isValidMove((r, c)):
-            info["invalid"] = True
-            return self._get_state(), -0.1, False, info
-        previous_count = self.game.board.get_current_stone_count()
-        
-        # place the stone using existing API
-        self.game.place_stone(train_player, (r, c), chosen_stone)
-
-        # simple opponent: perform one random legal move for the other player (if not done)
-        done = all(len(p.stones) == 0 for p in self.game.players) or not any(
-            self.game.board.isValidMove((rr, cc)) for rr in range(self.rows) for cc in range(self.cols)
+        # Map slot → actual stone object
+        chosen_stone = self._get_stone_for_slot(
+            player_idx=self.current_player_idx, slot=slot
         )
 
-        if not done:
-            # opponent index (naive 2-player assumption)
-            opp_idx = 1 - self.train_player_idx
-            opp = self.game.players[opp_idx]
-            # pick a random valid position and random stone from opp
-            valid_positions = [(rr, cc) for rr in range(self.rows) for cc in range(self.cols) if self.game.board.isValidMove((rr, cc))]
-            if valid_positions and len(opp.stones) > 0:
-                pos = random.choice(valid_positions)
-                stone = random.choice(opp.stones)
-                try:
-                    self.game.place_stone(opp, pos, stone)
-                except Exception:
-                    # if something goes wrong, ignore and continue
-                    pass
-
-        done = all(len(p.stones) == 0 for p in self.game.players) or not any(
-            self.game.board.isValidMove((rr, cc)) for rr in range(self.rows) for cc in range(self.cols)
+        # Check legality
+        legal = (
+            chosen_stone is not None
+            and self.game.board.isValidMove((row, col))
         )
 
-        reward = 0.0
-        if done:
-            counts = self.game.board.get_current_stone_count()
-            train_count = counts.get(train_player, 0)
-            other_count = sum(c for p, c in counts.items() if p != train_player)
-            if train_count > other_count:
-                reward = 1.0
-            elif train_count < other_count:
-                reward = -1.0
-            else:
-                reward = 0.0
-        
-        counts = self.game.board.get_current_stone_count()
-        train_count = counts.get(train_player, 0)
-        other_count = sum(c for p, c in counts.items() if p != train_player)
-        if train_count > other_count:
-                reward = 1.0
-        elif train_count < other_count:
-                reward = -1.0
+        if not legal:
+            # Illegal move → current player loses
+            reward = self._terminal_reward(illegal_for_player=self.current_player_idx)
+            terminated = True
+            truncated = False
+            obs = self._build_observation()
+            info = {"illegal_move": True}
+            return obs, reward, terminated, truncated, info
+
+        # --------- measure P0 stones before the move ----------
+        owner_counts_before = self.game.board.get_current_stone_count()
+        p0_before = owner_counts_before.get(self.game.players[0], 0)
+
+        # Apply the move (this may cause captures)
+        self.game.place_stone(player, (row, col), chosen_stone)
+
+        # --------- measure P0 stones after the move -----------
+        owner_counts_after = self.game.board.get_current_stone_count()
+        p0_after = owner_counts_after.get(self.game.players[0], 0)
+
+        delta_p0 = p0_after - p0_before
+
+        # Compute capture/loss reward from Player 0 perspective
+        # - If P0 moves: delta_p0 = 1 (new stone) + #captured_from_P1
+        #   so captures = delta_p0 - 1
+        # - If P1 moves: delta_p0 = - (#P0_stones_captured_by_P1)
+        #   which is already the punishment we want.
+        if self.current_player_idx == 0:
+            # Remove the baseline +1 for placing your own stone
+            net_captures_for_p0 = delta_p0 - 1
         else:
-                reward = 0.0
-        
-        reward += self.evaluate_reward(previous_count,self.game.board.get_current_stone_count())
+            # Directly use delta_p0 (typically 0 or negative)
+            net_captures_for_p0 = delta_p0
 
-        return self._get_state(), reward, done, info
-    
-    def evaluate_reward(self,previous_count,current_count) -> float:
-            # simple reward: +1 for each additional stone owned, -1 for each lost stone
-            reward = 0.0
-            train_player = self.game.players[self.train_player_idx]
-            prev = previous_count.get(train_player, 0)
-            curr = current_count.get(train_player, 0)
-            reward += (curr - prev) * 1.0
-            return reward
+        capture_reward = self.capture_reward * net_captures_for_p0
 
-    def _get_state(self) -> Any:
-        # simple JSON string state (deterministic ordering)
-        board_repr = []
-        for r in range(self.rows):
-            for c in range(self.cols):
-                cell = self.game.board.getField(r, c)
-                if cell is None or getattr(cell, "player", None) is None:
-                    board_repr.append(".")
-                else:
-                    owner_idx = 0 if self.game.players[0] == getattr(cell, "player") else 1
-                    # represent stone by owner and its name
-                    board_repr.append(f"{owner_idx}:{cell.name}")
+        # -----------------------------------------------------------
+        # Check terminal and add final game result reward if needed
+        # -----------------------------------------------------------
+        terminated = self._is_terminal()
+        truncated = False
 
-        players_stones = []
-        for p in self.game.players:
-            players_stones.append([s.name for s in p.stones])
+        reward = capture_reward
 
-        payload = {
-            "board": board_repr,
-            "players": players_stones,
-            "to_move": self.train_player_idx,
-        }
+        if terminated:
+            reward += self._final_outcome_reward()
+        else:
+            # Switch to other player
+            self.current_player_idx = 1 - self.current_player_idx
 
-        return json.dumps(payload, sort_keys=True)
-# algorithms/game_env.py
-from typing import Tuple, Any, List
-from services.game_instance import GameInstance
-from obj.stone import Stone
-import json
+        obs = self._build_observation()
+        info = {"capture_delta_p0": net_captures_for_p0}
 
-class GameEnv:
-    def __init__(self, game_factory=GameInstance, rows=3, cols=3, max_stones=4, train_player_idx=0):
-        self.game_factory = game_factory
-        self.rows = rows
-        self.cols = cols
-        self.max_stones = max_stones
-        self.n_actions = max_stones * rows * cols
-        self.train_player_idx = train_player_idx
+        if self.render_mode == "human":
+            self.render()
+
+        return obs, reward, terminated, truncated, info
+
+    def render(self):
+        if self.render_mode == "human" and self.game is not None:
+            print(f"Player to move: {self.current_player_idx}")
+            self.game.board.draw_board()
+
+    def close(self):
         self.game = None
 
-    def reset(self) -> Any:
-        self.game = self.game_factory()
-        self.game.setup_game(col=self.cols, row=self.rows)
-        # Optionally load stones from DTO instead of random
-        return self._get_state()
+    # ------------------------------------------------------------------ #
+    # Helper functions
+    # ------------------------------------------------------------------ #
 
-    def step(self, action_id: int) -> Tuple[Any, float, bool, dict]:
-        # Decode action
-        stone_idx = action_id // (self.rows * self.cols)
-        cell_idx = action_id % (self.rows * self.cols)
-        r = cell_idx // self.cols
-        c = cell_idx % self.cols
+    def _decode_action(self, action: int):
+        cells = self.rows * self.cols
+        slot = action // cells
+        cell_idx = action % cells
+        row = cell_idx // self.cols
+        col = cell_idx % self.cols
+        return slot, row, col
 
-        player = self.game.players[self.game.players.index(next(p for p in self.game.players if p.name == self.game.players[self.train_player_idx].name))]
-        # Validate stone availability
-        if stone_idx < 0 or stone_idx >= len(player.stones):
-            # invalid: penalty
-            return self._get_state(), -0.1, False, {"invalid": True}
-        stone = player.stones[stone_idx]
-        if not self.game.board.isValidMove((r, c)):
-            return self._get_state(), -0.1, False, {"invalid": True}
+    def _get_stone_for_slot(self, player_idx: int, slot: int):
+        """
+        Translate a slot index into the actual Stone object, if that stone is
+        still in the player's hand, using initial_slots name mapping.
+        """
+        slot_names = self.game.initial_slots.get(player_idx, [])
+        if not (0 <= slot < len(slot_names)):
+            return None
 
-        # Place stone (this already sets owner via set_Owner in your code)
-        self.game.place_stone(player, (r, c), stone)
+        stone_name = slot_names[slot]
+        if stone_name is None:
+            return None
 
-        # After placement, advance turn (your start_game loop handles order; here we can flip player index)
-        # Here we assume env controls turns for training; implement a minimal turn rotation:
-        # (for simple training, you may let the env choose actions for both players using agent or random.)
-        done = all(len(p.stones) == 0 for p in self.game.players) or not any(self.game.board.isValidMove((rr, cc)) for rr in range(self.rows) for cc in range(self.cols))
-
-        reward = 0.0
-        if done:
-            counts = self.game.board.get_current_stone_count()
-            # Determine winner counts relative to the training player's identity
-            train_player_obj = self.game.players[self.train_player_idx]
-            train_count = counts.get(train_player_obj, 0)
-            other_counts = sum(c for p, c in counts.items() if p != train_player_obj)
-            if train_count > other_counts:
-                reward = 1.0
-            elif train_count < other_counts:
-                reward = -1.0
-            else:
-                reward = 0.0
-
-        return self._get_state(), reward, done, {}
+        player = self.game.players[player_idx]
+        for s in player.stones:
+            if s.name == stone_name:
+                return s
+        return None
     
-    def _get_state(self):
-        # Create a canonical hashable state (simple JSON string)
-        board_repr = []
+    def get_legal_actions(self, player_idx: int | None = None):
+        """
+        Return a list of legal action indices for the given player
+        (or for current_player_idx if None).
+
+        An action is legal if:
+        - the chosen slot contains a stone for that player, and
+        - the chosen board cell is empty.
+        """
+        if self.game is None:
+            return []
+
+        if player_idx is None:
+            player_idx = self.current_player_idx
+
+        legal_actions = []
+        cells = self.rows * self.cols
+
+        for slot in range(self.max_slots):
+            stone = self._get_stone_for_slot(player_idx, slot)
+            if stone is None:
+                continue  # no stone in this slot (already played or invalid)
+
+            for r in range(self.rows):
+                for c in range(self.cols):
+                    if self.game.board.isValidMove((r, c)):
+                        cell_idx = r * self.cols + c
+                        a = slot * cells + cell_idx
+                        legal_actions.append(a)
+
+        return legal_actions
+
+    def _build_observation(self):
+        # --- board: owner + type_id ---
+        board_owner = np.zeros((self.rows, self.cols), dtype=np.int8)
+        board_type = np.full((self.rows, self.cols), fill_value=-1, dtype=np.int8)
+
         for r in range(self.rows):
             for c in range(self.cols):
                 cell = self.game.board.getField(r, c)
-                if cell is None or getattr(cell, "player", None) is None:
-                    board_repr.append(".")
+                if cell is Field.EMPTY:
+                    # owner 0, type -1 already set
+                    continue
+
+                owner = getattr(cell, "player", None)
+                attrs = cell.get_Attributes() if hasattr(cell, "get_Attributes") else (0, 0, 0, 0)
+                type_id = self.attr_to_type.get(attrs, -1)
+
+                if owner == self.game.players[0]:
+                    board_owner[r, c] = 1
+                elif owner == self.game.players[1]:
+                    board_owner[r, c] = 2
                 else:
-                    owner_idx = 0 if self.game.players[0] == getattr(cell, "player") else 1
-                    board_repr.append(f"{owner_idx}:{cell.name}")
-        payload = {"board": board_repr, "players": [[(s.n,s.s,s.e,s.w) for s in p.stones] for p in self.game.players], "to_move": 0}
-        return json.dumps(payload, sort_keys=True)
+                    board_owner[r, c] = 0  # unknown owner
+
+                board_type[r, c] = type_id
+
+        # --- stones in hand: type_id per slot or -1 if already played ---
+        hand_types = np.full((2, self.max_slots), fill_value=-1, dtype=np.int8)
+
+        for p_idx, player in enumerate(self.game.players):
+            slot_names = self.game.initial_slots[p_idx]
+            names_in_hand = {s.name: s for s in player.stones}
+
+            for slot_idx, stone_name in enumerate(slot_names):
+                if slot_idx >= self.max_slots:
+                    break
+                if stone_name is None:
+                    continue
+
+                stone_obj = names_in_hand.get(stone_name, None)
+                if stone_obj is None:
+                    # stone already played
+                    continue
+
+                attrs = stone_obj.get_Attributes()
+                type_id = self.attr_to_type.get(attrs, -1)
+                hand_types[p_idx, slot_idx] = type_id
+
+        to_move = np.array(self.current_player_idx, dtype=np.int8)
+
+        return {
+            "board_owner": board_owner,
+            "board_type": board_type,
+            "hand_types": hand_types,
+            "to_move": to_move,
+        }
+
+
+    def _is_terminal(self) -> bool:
+        no_player_stones = all(len(p.stones) == 0 for p in self.game.players)
+        no_empty_fields = not any(
+            self.game.board.isValidMove((r, c))
+            for r in range(self.rows)
+            for c in range(self.cols)
+        )
+        return no_player_stones or no_empty_fields
+
+    def _final_outcome_reward(self) -> float:
+        """
+        Final reward from Player 0's perspective:
+          +1 if P0 wins, -1 if P1 wins, 0 for draw.
+        """
+        owner_counts = self.game.board.get_current_stone_count()
+
+        if not owner_counts:
+            return 0.0
+
+        max_count = max(owner_counts.values())
+        winners = [p for p, c in owner_counts.items() if c == max_count]
+
+        if len(winners) != 1:
+            return 0.0
+
+        winner = winners[0]
+        if winner == self.game.players[0]:
+            return 1.0
+        elif winner == self.game.players[1]:
+            return -1.0
+        else:
+            return 0.0
+
+    def _terminal_reward(self, illegal_for_player: int) -> float:
+        """
+        Reward when someone plays an illegal move.
+        From Player 0's perspective.
+        """
+        if illegal_for_player == 0:
+            return -1.0
+        elif illegal_for_player == 1:
+            return 1.0
+        else:
+            return 0.0

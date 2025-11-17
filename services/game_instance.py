@@ -8,8 +8,7 @@ class GameInstance:
     def __init__(self):
         
         self.players = []
-        # initial_slots maps player index -> list of stone names in their initial ordering
-        # populated during setup_players
+
         self.initial_slots = {}
     
     def add_player(self, player: Player):

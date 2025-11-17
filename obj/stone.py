@@ -15,5 +15,8 @@ class Stone:
     def get_Owner(self):
         return self.owner
     
+    def get_representation(self):
+        return f"{self.name}({self.n},{self.s},{self.e},{self.w})"
+    
     def get_Attributes(self):
         return (self.n, self.s, self.e, self.w)

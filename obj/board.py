@@ -86,7 +86,7 @@ class Board:
             target_attack = getattr(target, def_attr, 0)
 
             if placed_attack > target_attack:
-                print(f"{placed.player.name}'s stone at ({row},{col}) captures {target.player.name}'s stone at ({r},{c})!")
+                #print(f"{placed.player.name}'s stone at ({row},{col}) captures {target.player.name}'s stone at ({r},{c})!")
                 try:
                     target.set_Owner(placed.player)
                 except Exception:
