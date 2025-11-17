@@ -1,0 +1,2 @@
+class GameService:
+    pass

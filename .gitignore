@@ -1,0 +1,5 @@
+/q_table_mc.pkl
+/q_table_mc_vs_qlearn.pkl
+/q_table_qlearn.pkl
+/q_table_qlearn_vs_mc.pkl
+/q_table_smoke.pkl
