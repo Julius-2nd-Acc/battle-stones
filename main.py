@@ -79,19 +79,17 @@ def _choose_action_for_player(agent, env: SkystonesEnv, obs, player_idx: int) ->
 
 def _describe_action(env: SkystonesEnv, action: int, player_idx: int, controller_label: str) -> str:
     """
-    Turn an action index into a human-readable description:
-    which slot, which stone, and which board cell.
+    Describe an action using the *current* game state (before step).
     """
-    # Use env's own decoder
     slot, row, col = env._decode_action(action)
-
     stone = env._get_stone_for_slot(player_idx, slot)
+
     if stone is not None and hasattr(stone, "get_representation"):
         stone_repr = stone.get_representation()
     elif stone is not None and hasattr(stone, "name"):
         stone_repr = stone.name
     else:
-        stone_repr = "None"
+        stone_repr = "None (empty slot)"
 
     return (
         f"Player {player_idx} [{controller_label}] plays "
@@ -124,52 +122,41 @@ def play_one_episode(env, agent_p0=None, agent_p1=None, render=False):
     while not done:
         current_player = env.current_player_idx
 
-        # Decide which controller to use & label
         if current_player == 0:
             controller = agent_p0
-            controller_label = (
-                type(agent_p0).__name__ if agent_p0 is not None else "Random"
-            )
+            controller_label = type(agent_p0).__name__ if agent_p0 is not None else "Random"
             action = _choose_action_for_player(agent_p0, env, obs, player_idx=0)
-        else:  # current_player == 1
+        else:
             controller = agent_p1
-            controller_label = (
-                type(agent_p1).__name__ if agent_p1 is not None else "Random"
-            )
+            controller_label = type(agent_p1).__name__ if agent_p1 is not None else "Random"
             action = _choose_action_for_player(agent_p1, env, obs, player_idx=1)
+
+        # Build description BEFORE step mutates the state
+        if render:
+            move_desc = _describe_action(env, action, current_player, controller_label)
 
         next_obs, reward, terminated, truncated, info = env.step(action)
 
-        # Illegal move handling
         if info.get("illegal_move", False):
             if render:
                 print(f"\nMove {move_number}:")
-                print(
-                    _describe_action(
-                        env, action, current_player, controller_label
-                    )
-                )
+                print(move_desc)
                 print(f"→ ILLEGAL move by Player {current_player}, retrying...")
                 env.render()
-            # Do NOT add reward, do NOT mark done, same player moves again
             obs = next_obs
             move_number += 1
             continue
 
-        # Legal move
         if render:
             print(f"\nMove {move_number}:")
-            print(
-                _describe_action(
-                    env, action, current_player, controller_label
-                )
-            )
+            print(move_desc)
             env.render()
 
         obs = next_obs
         total_reward_p0 += reward
         done = terminated or truncated
         move_number += 1
+
 
     # Determine winner from final board state
     owner_counts = env.game.board.get_current_stone_count()
