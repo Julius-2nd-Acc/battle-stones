@@ -1,16 +1,16 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import uuid
 import os
 import random
 import threading
 import time
 import logging
-
 import numpy as np
 
 from services.game_instance import GameInstance
+from services.state_builder import StateBuilder
 from obj.player import PlayerType
-
+from algorithms.agent_interface import Agent
 
 class _ActionSpace:
     def __init__(self, n: int, rng: random.Random):
@@ -20,78 +20,85 @@ class _ActionSpace:
     def sample(self) -> int:
         return int(self._rng.randrange(self.n))
 
+class RandomAgent(Agent):
+    def __init__(self, action_space):
+        self.action_space = action_space
+        
+    def choose_action(self, observation: Any, legal_actions: List[int] | None = None) -> int:
+        if legal_actions:
+            return random.choice(legal_actions)
+        return self.action_space.sample()
+
+class GameContext:
+    def __init__(self, game_instance: GameInstance, agents: List[Optional[Agent]]):
+        self.game = game_instance
+        self.agents = agents
+        self.started = False
+        self.lock = threading.Lock()
 
 class GameController:
     def __init__(self):
-        self.games: Dict[str, GameInstance] = {}
+        self.games: Dict[str, GameContext] = {}
         self.rng = random.Random()
         self._runners: Dict[str, tuple] = {}
         self.logger = logging.getLogger(__name__)
+        
+        # Global stats tracking
+        self.stats = {
+            "total_games": 0,
+            "agent_wins": {} # e.g., "q": 10, "mc": 5, "random": 2
+        }
 
     def create_game_with_players(self, rows: int = 3, cols: int = 3, player0: str = "human", player1: str = "random") -> str:
         gid = str(uuid.uuid4())
         gi = GameInstance()
-        gi.setup_game(col=cols, row=rows, p1=PlayerType[player0.upper()], p2=PlayerType[player1.upper()])
+        
+        def _resolve_player_type(p_str: str) -> PlayerType:
+            p_str = p_str.lower()
+            if p_str == 'qlearn':
+                return PlayerType.Q
+            try:
+                return PlayerType[p_str.upper()]
+            except KeyError:
+                raise ValueError(f"Unknown player type: {p_str}")
 
+        p1_type = _resolve_player_type(player0)
+        p2_type = _resolve_player_type(player1)
+
+        gi.setup_game(col=cols, row=rows, p1=p1_type, p2=p2_type)
+
+        agents = [None, None]
         controls = [player0, player1]
+        
         for idx, ctl in enumerate(controls):
-            try:
-                player = gi.players[idx]
-            except Exception:
-                continue
+            agent, loaded_path = self._make_agent(ctl, gi, idx)
+            agents[idx] = agent
+            player = gi.players[idx]
+            
+            if agent:
+                player.assign_agent(agent, loaded_from=loaded_path)
 
-            ctl_str = (str(ctl) if ctl is not None else "").lower()
-            # If `GameInstance.setup_game` already set the player's type/ai_kind,
-            # prefer those values. Only update `ai_kind` when it is not present.
-            if getattr(player, 'ai_kind', None) is None:
-                if ctl_str in ('', 'human'):
-                    player.ai_kind = None
-                elif ctl_str == 'random':
-                    player.ai_kind = 'random'
-                elif ctl_str in ('mc', 'mca', 'montecarlo'):
-                    player.ai_kind = 'mc'
-                elif ctl_str in ('q', 'qlearn', 'q-learning'):
-                    player.ai_kind = 'qlearn'
-                else:
-                    # unknown control string -> default to random
-                    player.ai_kind = 'random'
+        self.games[gid] = GameContext(gi, agents)
 
-            # Ensure player has a consistent _agent_info entry for the API
-            if not getattr(player, '_agent_info', None):
-                ptype = (getattr(player, 'player_type', None).name.lower() if getattr(player, 'player_type', None) is not None else (player.ai_kind or 'unknown'))
-                player._agent_info = {"type": ptype, "present": False, "loaded_from": None}
+        # Auto-start autoplay if no human players
+        if all(c.lower() != 'human' for c in controls):
+            self.start_autoplay(gid, delay=3.0)
 
-            # If an on-disk model file exists for MC or Q, record its path now so
-            # `GET /games/{id}` can report it before the player is first used.
-            try:
-                if player.ai_kind == 'mc':
-                    mpath = os.path.join('models', 'mc_agent_skystones.pkl')
-                    if os.path.exists(mpath):
-                        player._agent_info['loaded_from'] = mpath
-                        player._agent_info['present'] = True
-                elif player.ai_kind == 'qlearn':
-                    mpath = os.path.join('models', 'q_agent_skystones.pkl')
-                    if os.path.exists(mpath):
-                        player._agent_info['loaded_from'] = mpath
-                        player._agent_info['present'] = True
-            except Exception:
-                # non-fatal; leave _agent_info as-is
-                pass
-
-        self.games[gid] = gi
         return gid
 
     def list_games(self) -> Dict[str, Any]:
-        return {gid: {"started": getattr(gi, 'started', False)} for gid, gi in self.games.items()}
+        return {gid: {"started": ctx.started} for gid, ctx in self.games.items()}
 
     def get_state(self, game_id: str, player_idx: int = 0) -> Dict[str, Any]:
-        gi = self.games[game_id]
-        state = gi.get_canonical_state(player_idx)
-        started = getattr(gi, 'started', False)
-
+        ctx = self.games[game_id]
+        gi = ctx.game
+        
+        state = StateBuilder.build_canonical_state(gi, player_idx)
+        
         winner = None
         counts = gi.board.get_current_stone_count() or {}
-        if not started and counts:
+        if not ctx.started and counts: # Game Over check approximation
+             # This logic is a bit duplicated from GameInstance.check_game_over but useful for API
             max_count = max(counts.values())
             winners = [p for p, c in counts.items() if c == max_count]
             if len(winners) == 1:
@@ -101,23 +108,27 @@ class GameController:
 
         return {
             "state": state,
-            "started": started,
+            "started": ctx.started,
             "winner": winner,
             "counts": {p.name: counts.get(p, 0) for p in gi.players},
-            "agents": {i: getattr(p, "_agent_info", {"type": (getattr(p, "player_type", None).name.lower() if getattr(p, "player_type", None) is not None else "unknown"), "present": False, "loaded_from": None}) for i, p in enumerate(gi.players)},
+            "agents": {i: getattr(p, "_agent_info", {}) for i, p in enumerate(gi.players)},
         }
 
     def seed(self, game_id: str, seed: Optional[int] = None) -> int:
         if seed is None:
             seed = random.randrange(2 ** 30)
         self.rng.seed(seed)
-        gi = self.games.get(game_id)
-        if gi is not None:
-            gi._controller_rng = random.Random(seed)
+        # We might want to seed agents here too if they support it
         return seed
 
     def step(self, game_id: str, action: int, player_idx: int = 0) -> Dict[str, Any]:
-        gi = self.games[game_id]
+        ctx = self.games[game_id]
+        gi = ctx.game
+        
+        # Validate turn
+        # In a real app we'd check if it's actually this player's turn, 
+        # but for now we assume the API caller knows what they are doing or it's a human move.
+        
         rows = gi.board.rows
         cols = gi.board.cols
         max_slots = len(gi.initial_slots.get(player_idx, []))
@@ -139,13 +150,17 @@ class GameController:
                     break
 
         if chosen_stone is None:
-            return {"error": "invalid action or stone not available", "state": gi.get_canonical_state(player_idx)}
+            return {"error": "invalid action or stone not available", "state": StateBuilder.build_canonical_state(gi, player_idx)}
 
         if not gi.board.isValidMove((r, c)):
-            return {"error": "invalid move", "state": gi.get_canonical_state(player_idx)}
+            return {"error": "invalid move", "state": StateBuilder.build_canonical_state(gi, player_idx)}
 
         gi.place_stone(gi.players[player_idx], (r, c), chosen_stone)
         gi.check_game_over()
+        if not gi.started:
+            ctx.started = False
+            self._update_stats(gi)
+            
         return self.get_state(game_id, player_idx=player_idx)
 
     def delete_game(self, game_id: str) -> bool:
@@ -161,26 +176,56 @@ class GameController:
         if game_id in self._runners:
             return False
 
-        gi = self.games[game_id]
+        ctx = self.games[game_id]
         stop_event = threading.Event()
 
         def _runner():
-            gi.started = True
+            ctx.started = True
+            ctx.game.started = True # Sync
             try:
-                while gi.started and not stop_event.is_set():
-                    for player in list(gi.players):
-                        if getattr(player, "player_type", None) == PlayerType.HUMAN and getattr(player, "policy", None) is None:
-                            continue
-                        if stop_event.is_set() or not gi.started:
-                            break
+                while ctx.started and not stop_event.is_set():
+                    # Determine whose turn it is? 
+                    # The GameInstance doesn't strictly track "current player" index in a variable, 
+                    # it usually iterates. But here we need to know who moves next.
+                    # We'll just iterate players and try to move if they have stones.
+                    
+                    moves_made = 0
+                    for p_idx, player in enumerate(ctx.game.players):
+                        if stop_event.is_set() or not ctx.started: break
+                        
+                        if len(player.stones) == 0: continue
+                        
+                        agent = ctx.agents[p_idx]
+                        if agent is None: continue # Human player, skip in autoplay
+                        
+                        # Get Observation
+                        obs = StateBuilder.build_gym_observation(ctx.game, p_idx)
+                        
+                        # Get Legal Actions
+                        legal_actions = self._get_legal_actions(ctx.game, p_idx)
+                        
+                        if not legal_actions: continue
+                        
+                        # Ask Player (who delegates to Agent)
                         try:
-                            gi.player_turn(player)
-                        except Exception:
-                            pass
-                        gi.check_game_over()
-                        if not gi.started or stop_event.is_set():
+                            action = player.choose_action(obs, legal_actions)
+                            self.step(game_id, action, p_idx)
+                            moves_made += 1
+                            time.sleep(max(0.0, float(delay)))
+                        except Exception as e:
+                            self.logger.error(f"Agent error: {e}")
+                            
+                    if moves_made == 0:
+                        # Game might be over or stuck
+                        ctx.game.check_game_over()
+                        if not ctx.game.started:
+                            ctx.started = False
+                            self._update_stats(ctx.game)
                             break
-                        time.sleep(max(0.0, float(delay)))
+                        # If no one moved but game is started, maybe waiting for human?
+                        # Just sleep a bit to avoid busy loop
+                        time.sleep(0.1)
+
             finally:
                 self._runners.pop(game_id, None)
 
@@ -195,9 +240,12 @@ class GameController:
             return False
         t, ev = entry
         ev.set()
-        gi = self.games.get(game_id)
-        if gi:
-            gi.started = False
+        
+        ctx = self.games.get(game_id)
+        if ctx:
+            ctx.started = False
+            ctx.game.started = False
+            
         t.join(timeout)
         self._runners.pop(game_id, None)
         return True
@@ -205,17 +253,20 @@ class GameController:
     def is_autoplaying(self, game_id: str) -> bool:
         return game_id in self._runners
 
-    # ----------------- Policy factory ----------------- #
-    def _make_policy(self, control: str, gi: GameInstance, player_idx: int):
+    def _get_legal_actions(self, gi: GameInstance, player_idx: int) -> List[int]:
+        return StateBuilder.get_legal_actions(gi, player_idx)
+
+    def _make_agent(self, control: str, gi: GameInstance, player_idx: int) -> tuple[Optional[Agent], Optional[str]]:
         control = (control or "").lower()
         if control == 'human':
-            return None
+            return None, None
 
         rows = gi.board.rows
         cols = gi.board.cols
         max_slots = max((len(s) for s in gi.initial_slots.values()), default=0)
         action_n = max_slots * rows * cols
 
+        # Create a local RNG for the action space
         per_rng = random.Random()
         try:
             per_rng.setstate(self.rng.getstate())
@@ -224,74 +275,6 @@ class GameController:
 
         action_space = _ActionSpace(action_n, per_rng)
 
-        def _build_obs():
-            board_owner = np.zeros((rows, cols), dtype=np.int8)
-            board_type = np.full((rows, cols), fill_value=-1, dtype=np.int8)
-
-            attr_to_type = {}
-            type_id = 0
-            for p_idx, slot_names in gi.initial_slots.items():
-                player = gi.players[p_idx]
-                for name in slot_names:
-                    if name is None:
-                        continue
-                    stone_obj = next((s for s in player.stones if s.name == name), None)
-                    if stone_obj is None:
-                        for rr in range(rows):
-                            for cc in range(cols):
-                                cell = gi.board.getField(rr, cc)
-                                if cell is not None and getattr(cell, 'name', None) == name:
-                                    stone_obj = cell
-                                    break
-                            if stone_obj is not None:
-                                break
-                    if stone_obj is None:
-                        continue
-                    try:
-                        attrs = tuple(stone_obj.get_Attributes())
-                    except Exception:
-                        attrs = (0, 0, 0, 0)
-                    if attrs not in attr_to_type:
-                        attr_to_type[attrs] = type_id
-                        type_id += 1
-
-            for rr in range(rows):
-                for cc in range(cols):
-                    cell = gi.board.getField(rr, cc)
-                    if cell is None or getattr(cell, 'player', None) is None:
-                        continue
-                    try:
-                        attrs = tuple(cell.get_Attributes())
-                    except Exception:
-                        attrs = (0, 0, 0, 0)
-                    tid = attr_to_type.get(attrs, -1)
-                    owner = 0 if cell.player == gi.players[0] else 1
-                    board_owner[rr, cc] = owner
-                    board_type[rr, cc] = tid
-
-            hand_types = np.full((2, max_slots), fill_value=-1, dtype=np.int8)
-            for p_idx, player in enumerate(gi.players):
-                slot_names = gi.initial_slots.get(p_idx, [])
-                names_in_hand = {s.name: s for s in player.stones}
-                for slot_idx, stone_name in enumerate(slot_names):
-                    if slot_idx >= max_slots:
-                        break
-                    if stone_name is None:
-                        continue
-                    stone_obj = names_in_hand.get(stone_name, None)
-                    if stone_obj is None:
-                        continue
-                    try:
-                        attrs = tuple(stone_obj.get_Attributes())
-                    except Exception:
-                        attrs = (0, 0, 0, 0)
-                    hand_types[p_idx, slot_idx] = attr_to_type.get(attrs, -1)
-
-            to_move = np.array(player_idx, dtype=np.int8)
-            return {"board_owner": board_owner, "board_type": board_type, "hand_types": hand_types, "to_move": to_move}
-
-        agent = None
-        model_path = None
         if control == 'mc':
             try:
                 from algorithms.greedy_mc import MCAgent
@@ -299,61 +282,57 @@ class GameController:
                 if os.path.exists(model_path):
                     agent = MCAgent.load(model_path, action_space)
                     self.logger.info(f"Loaded MCAgent from {model_path}")
+                    return agent, model_path
                 else:
-                    agent = MCAgent(action_space)
-                    self.logger.info("Created new (untrained) MCAgent")
-            except Exception:
-                agent = None
+                    raise FileNotFoundError(f"MC agent model not found at {model_path}")
+            except ImportError as e:
+                self.logger.error(f"Failed to import MC agent: {e}")
+                raise ValueError(f"MC agent implementation not found: {e}")
 
-        if control == 'qlearn':
+        if control in ('qlearn', 'q'):
             try:
                 from algorithms.q_learning import QLearningAgent
                 model_path = os.path.join('models', 'q_agent_skystones.pkl')
                 if os.path.exists(model_path):
                     agent = QLearningAgent.load(model_path, action_space)
                     self.logger.info(f"Loaded QLearningAgent from {model_path}")
+                    return agent, model_path
                 else:
-                    agent = QLearningAgent(action_space)
-                    self.logger.info("Created new (untrained) QLearningAgent")
-            except Exception:
-                agent = None
+                    raise FileNotFoundError(f"Q-learning agent model not found at {model_path}")
+            except ImportError as e:
+                self.logger.error(f"Failed to import Q agent: {e}")
+                raise ValueError(f"Q-learning agent implementation not found: {e}")
 
-        def _policy(state_json: str):
-            obs = _build_obs()
+        if control == 'random':
+            return RandomAgent(action_space), None
 
-            legal_actions = []
-            cells = rows * cols
-            slot_names = gi.initial_slots.get(player_idx, [])
-            available_names = {s.name for s in gi.players[player_idx].stones}
-            for slot, sname in enumerate(slot_names):
-                if sname is None:
-                    continue
-                if sname not in available_names:
-                    continue
-                for rr in range(rows):
-                    for cc in range(cols):
-                        if gi.board.isValidMove((rr, cc)):
-                            legal_actions.append(slot * cells + (rr * cols + cc))
+        raise ValueError(f"Unknown agent type: {control}")
 
-            if agent is not None:
-                if hasattr(agent, 'policy_action_masked') and legal_actions:
-                    return int(agent.policy_action_masked(obs, legal_actions))
-                if hasattr(agent, 'greedy_action_masked') and legal_actions:
-                    return int(agent.greedy_action_masked(obs, legal_actions))
-                if hasattr(agent, 'greedy_action'):
-                    return int(agent.greedy_action(obs))
+    def _update_stats(self, gi: GameInstance):
+        self.stats["total_games"] += 1
+        
+        counts = gi.board.get_current_stone_count() or {}
+        if not counts: return
+        
+        max_count = max(counts.values())
+        winners = [p for p, c in counts.items() if c == max_count]
+        
+        if len(winners) == 1:
+            winner = winners[0]
+            agent_info = getattr(winner, "_agent_info", {})
+            
+            atype = "unknown"
+            loaded = agent_info.get("loaded_from", "")
+            if loaded:
+                if "mc" in loaded.lower(): atype = "mc"
+                elif "q" in loaded.lower(): atype = "q"
+            else:
+                 if hasattr(winner, "agent") and winner.agent:
+                     atype = "random"
+                 else:
+                     atype = "human"
+            
+            self.stats["agent_wins"][atype] = self.stats["agent_wins"].get(atype, 0) + 1
+        else:
+            self.stats["agent_wins"]["draw"] = self.stats["agent_wins"].get("draw", 0) + 1
 
-            if legal_actions:
-                return int(self.rng.choice(legal_actions))
-
-            try:
-                return int(action_space.sample())
-            except Exception:
-                return 0
-
-        # attach metadata to the returned callable so callers (and the controller)
-        # can inspect whether a model was loaded and where it came from.
-        agent_loaded_from = model_path if (model_path) else None
-        _policy._agent_info = {"type": control, "present": bool(agent is not None), "loaded_from": agent_loaded_from}
-
-        return _policy

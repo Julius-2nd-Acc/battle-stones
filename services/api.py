@@ -44,13 +44,21 @@ controller = GameController()
 
 @app.post("/games")
 def create_game(req: CreateGameRequest):
-    gid = controller.create_game_with_players(rows=req.rows, cols=req.cols, player0=req.player0, player1=req.player1)
-    return {"id": gid}
+    try:
+        gid = controller.create_game_with_players(rows=req.rows, cols=req.cols, player0=req.player0, player1=req.player1)
+        return {"id": gid}
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/games")
 def list_games():
     return controller.list_games()
+
+
+@app.get("/stats")
+def get_stats():
+    return controller.stats
 
 
 @app.get("/games/{game_id}")

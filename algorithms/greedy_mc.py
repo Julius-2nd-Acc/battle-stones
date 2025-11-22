@@ -1,9 +1,10 @@
 import random
 import pickle
 from collections import defaultdict
+from typing import Any, List
 
 import numpy as np
-
+from algorithms.agent_interface import Agent
 
 def obs_to_state(obs) -> tuple:
     """
@@ -16,7 +17,7 @@ def obs_to_state(obs) -> tuple:
     to_move = int(obs["to_move"])
     return board_owner_flat + board_type_flat + hand_flat + (to_move,)
 
-class MCAgent:
+class MCAgent(Agent):
     """
     First-visit Monte Carlo control (ε-greedy).
     Q: state -> action values (tabular)
@@ -36,6 +37,15 @@ class MCAgent:
 
     def _zeros_for_state(self):
         return np.zeros(self.action_space.n, dtype=np.float32)
+    
+    def choose_action(self, observation: Any, legal_actions: List[int] | None = None) -> int:
+        """
+        Implementation of Agent interface.
+        Uses GREEDY masked policy (no epsilon) for inference.
+        """
+        if legal_actions is not None:
+            return self.greedy_action_masked(observation, legal_actions)
+        return self.greedy_action(observation)
 
     # --------- policy / state helpers --------- #
 
