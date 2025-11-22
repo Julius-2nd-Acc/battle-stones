@@ -277,6 +277,6 @@ def run_mc_vs_q(num_episodes=50, render=False):
 if __name__ == "__main__":
     # Choose which matchup you want to run.
     # Set render=True to print the board and move descriptions.
-    run_q_vs_random(num_episodes=5, render=True)
-    # run_mc_vs_random(num_episodes=5, render=True)
-    # run_mc_vs_q(num_episodes=5, render=True)
+    #run_q_vs_random(num_episodes=500, render=True)
+    # run_mc_vs_random(num_episodes=1000, render=False)
+    run_mc_vs_q(num_episodes=10000, render=False)

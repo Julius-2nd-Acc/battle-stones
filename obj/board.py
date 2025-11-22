@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import List, Tuple, Dict, Any, Optional
 
 class Field(Enum):
     EMPTY = 0
@@ -10,7 +11,7 @@ class Board:
             self.rows = rows
             self.cols = cols
             # grid holds Field.EMPTY for empty cells or a stone object
-            self.grid = [[Field.EMPTY for _ in range(cols)] for _ in range(rows)]
+            self.grid: List[List[Any]] = [[Field.EMPTY for _ in range(cols)] for _ in range(rows)]
 
     def placeStone(self, row, col, stone):
             """Place a stone object at (row, col). Raises on out-of-bounds or invalid stone."""

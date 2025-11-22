@@ -4,6 +4,7 @@ import numpy as np
 
 from obj.board import Field
 from services.game_instance import GameInstance
+from services.state_builder import StateBuilder
 
 
 class SkystonesEnv(gym.Env):
@@ -31,6 +32,8 @@ class SkystonesEnv(gym.Env):
         self.max_slots = max(len(slots) for slots in tmp_game.initial_slots.values())
 
         # Build a mapping from stone (n,s,e,w) -> type_id
+        # Note: This logic is now partially duplicated in StateBuilder, 
+        # but we need num_types for the observation space definition.
         self.attr_to_type = {}
         type_id = 0
         for p_idx, slot_names in tmp_game.initial_slots.items():
@@ -227,90 +230,17 @@ class SkystonesEnv(gym.Env):
         """
         Return a list of legal action indices for the given player
         (or for current_player_idx if None).
-
-        An action is legal if:
-        - the chosen slot contains a stone for that player, and
-        - the chosen board cell is empty.
         """
         if self.game is None:
             return []
 
         if player_idx is None:
             player_idx = self.current_player_idx
-
-        legal_actions = []
-        cells = self.rows * self.cols
-
-        for slot in range(self.max_slots):
-            stone = self._get_stone_for_slot(player_idx, slot)
-            if stone is None:
-                continue  # no stone in this slot (already played or invalid)
-
-            for r in range(self.rows):
-                for c in range(self.cols):
-                    if self.game.board.isValidMove((r, c)):
-                        cell_idx = r * self.cols + c
-                        a = slot * cells + cell_idx
-                        legal_actions.append(a)
-
-        return legal_actions
+            
+        return StateBuilder.get_legal_actions(self.game, player_idx)
 
     def _build_observation(self):
-        # --- board: owner + type_id ---
-        board_owner = np.zeros((self.rows, self.cols), dtype=np.int8)
-        board_type = np.full((self.rows, self.cols), fill_value=-1, dtype=np.int8)
-
-        for r in range(self.rows):
-            for c in range(self.cols):
-                cell = self.game.board.getField(r, c)
-                if cell is Field.EMPTY:
-                    # owner 0, type -1 already set
-                    continue
-
-                owner = getattr(cell, "player", None)
-                attrs = cell.get_Attributes() if hasattr(cell, "get_Attributes") else (0, 0, 0, 0)
-                type_id = self.attr_to_type.get(attrs, -1)
-
-                if owner == self.game.players[0]:
-                    board_owner[r, c] = 1
-                elif owner == self.game.players[1]:
-                    board_owner[r, c] = 2
-                else:
-                    board_owner[r, c] = 0  # unknown owner
-
-                board_type[r, c] = type_id
-
-        # --- stones in hand: type_id per slot or -1 if already played ---
-        hand_types = np.full((2, self.max_slots), fill_value=-1, dtype=np.int8)
-
-        for p_idx, player in enumerate(self.game.players):
-            slot_names = self.game.initial_slots[p_idx]
-            names_in_hand = {s.name: s for s in player.stones}
-
-            for slot_idx, stone_name in enumerate(slot_names):
-                if slot_idx >= self.max_slots:
-                    break
-                if stone_name is None:
-                    continue
-
-                stone_obj = names_in_hand.get(stone_name, None)
-                if stone_obj is None:
-                    # stone already played
-                    continue
-
-                attrs = stone_obj.get_Attributes()
-                type_id = self.attr_to_type.get(attrs, -1)
-                hand_types[p_idx, slot_idx] = type_id
-
-        to_move = np.array(self.current_player_idx, dtype=np.int8)
-
-        return {
-            "board_owner": board_owner,
-            "board_type": board_type,
-            "hand_types": hand_types,
-            "to_move": to_move,
-        }
-
+        return StateBuilder.build_gym_observation(self.game, self.current_player_idx)
 
     def _is_terminal(self) -> bool:
         no_player_stones = all(len(p.stones) == 0 for p in self.game.players)
