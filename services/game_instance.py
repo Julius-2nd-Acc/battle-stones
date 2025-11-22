@@ -14,19 +14,19 @@ class GameInstance:
     def add_player(self, player: Player):
         self.players.append(player)
         
-    def setup_game(self, col=3, row=3):
+    def setup_game(self, col=3, row=3, p1= PlayerType.HUMAN, p2= PlayerType.RANDOM):
         self.started = True
         self.setup_board(col=col, rows=row)
-        self.setup_players()
+        self.setup_players(p1=p1, p2=p2)
         pass
     
     def setup_board(self,col=3,rows=3):
         board = Board(cols=col,rows=rows)
         self.board = board
 
-    def setup_players(self):
-        self.add_player(Player("B", PlayerType.HUMAN))
-        self.add_player(Player("R", PlayerType.AI))
+    def setup_players(self, p1= PlayerType.HUMAN, p2= PlayerType.RANDOM):
+        self.add_player(Player("B", p1))
+        self.add_player(Player("R", p2))
         for player in self.players:
             self.generate_stones_for_player(player)
         # record initial stone slot ordering and pad to uniform length
@@ -70,40 +70,41 @@ class GameInstance:
             print(f"{player.name} has no stones left to play.")
             return
 
-        # If player has an injected policy, try to use it first (inference mode)
+        # Try to get an action from the player (this may lazy-load agents inside Player.choose_action)
         player_idx = self.players.index(player)
-        if getattr(player, "policy", None) is not None:
-            try:
-                state = self.get_canonical_state(player_idx)
-                action = player.choose_action(state)
-                # decode action -> slot, row, col
-                max_slots = len(self.initial_slots.get(player_idx, []))
-                rows = self.board.rows
-                cols = self.board.cols
-                slot = action // (rows * cols)
-                cell_idx = action % (rows * cols)
-                r = cell_idx // cols
-                c = cell_idx % cols
+        try:
+            action = player.choose_action(self, player_idx)
+            # decode action -> slot, row, col
+            max_slots = len(self.initial_slots.get(player_idx, []))
+            rows = self.board.rows
+            cols = self.board.cols
+            slot = action // (rows * cols)
+            cell_idx = action % (rows * cols)
+            r = cell_idx // cols
+            c = cell_idx % cols
 
-                # map slot -> stone name
-                slot_name = None
-                if 0 <= slot < max_slots:
-                    slot_name = self.initial_slots[player_idx][slot]
+            # map slot -> stone name
+            slot_name = None
+            if 0 <= slot < max_slots:
+                slot_name = self.initial_slots[player_idx][slot]
 
-                chosen_stone = None
-                if slot_name is not None:
-                    for s in player.stones:
-                        if s.name == slot_name:
-                            chosen_stone = s
-                            break
+            chosen_stone = None
+            if slot_name is not None:
+                for s in player.stones:
+                    if s.name == slot_name:
+                        chosen_stone = s
+                        break
 
-                if chosen_stone is not None and self.board.isValidMove((r, c)):
-                    self.place_stone(player, (r, c), chosen_stone)
-                    return
-                else:
-                    print("Policy suggested invalid move; falling back to random move.")
-            except Exception:
-                print("Policy failed during decision; falling back to random move.")
+            if chosen_stone is not None and self.board.isValidMove((r, c)):
+                self.place_stone(player, (r, c), chosen_stone)
+                return
+            else:
+                print("Player suggested invalid move; falling back to random move.")
+        except RuntimeError as e:
+            # Human or explicit failure - fall back to random
+            print(str(e))
+        except Exception:
+            print("Policy/agent failed during decision; falling back to random move.")
 
         # Player's turn logic goes here
         # For now, just dummy place a stone at a random valid position
