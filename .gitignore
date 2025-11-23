@@ -3,3 +3,7 @@
 /q_table_qlearn.pkl
 /q_table_qlearn_vs_mc.pkl
 /q_table_smoke.pkl
+*.ipynb
+__pycache__
+models
+stats

@@ -54,8 +54,20 @@ class Trainer:
                     else:
                         action = self.env.action_space.sample()
 
+                # DEBUG: make sure we never step with an illegal action according to our own mask
+                if self.env.current_player_idx == 0:  # only for the agent player
+                    assert action in legal_actions, f"Chosen action {action} not in legal_actions {legal_actions[:20]}"
+
                 next_obs, reward, terminated, truncated, info = self.env.step(action)
                 done = terminated or truncated
+                '''
+                if done:
+                    print(
+                        f"Episode {episode_idx} done. "
+                        f"terminated={terminated}, truncated={truncated}, "
+                        f"illegal_move={info.get('illegal_move', False)}, reward={reward}"
+                    )
+                '''
                 
                 # Track data for MC
                 if hasattr(self.agent, 'get_state_key'):
@@ -64,7 +76,8 @@ class Trainer:
 
                 # Q-Learning Update (Online)
                 if player_to_act == 0 and hasattr(self.agent, 'update'):
-                    legal_next = self.env.get_legal_actions() if not done else []
+                    # we care about what P0 could do next, not P1
+                    legal_next = self.env.get_legal_actions(player_idx=0) if not done else []
                     self.agent.update(obs, action, reward, next_obs, done, legal_next_actions=legal_next)
 
                 total_reward += reward

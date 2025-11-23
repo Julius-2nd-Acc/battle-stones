@@ -5,6 +5,9 @@ from algorithms.greedy_mc import MCAgent
 from algorithms.q_learning import QLearningAgent
 from algorithms.game_env import SkystonesEnv
 
+from algorithms.function_approximation.approximator_agent import FunctionApproximationAgent
+from algorithms.function_approximation.model_classes import SmallQNet
+
 
 MC_MODEL_PATH = Path("models/mc_agent_skystones.pkl")
 Q_MODEL_PATH = Path("models/q_agent_skystones.pkl")
@@ -273,10 +276,40 @@ def run_mc_vs_q(num_episodes=50, render=False):
         f"P0(Q) wins={wins_p0}, P1(MC) wins={wins_p1}, draws={draws}"
     )
 
+def run_qnet_vs_random(num_episodes=50, render=False):
+    env = SkystonesEnv(render_mode="human" if render else None, capture_reward=1.0)
+    qnet_agent = FunctionApproximationAgent.load(filepath='models/small_qnet.pkl', env=env, model_cls=SmallQNet, hidden_dim=128)
+
+    wins_p0 = 0
+    wins_p1 = 0
+    draws = 0
+
+    for ep in range(1, num_episodes + 1):
+        winner, total_reward_p0 = play_one_episode(
+            env, agent_p0=qnet_agent, agent_p1=None, render=render
+        )
+
+        if winner == 0:
+            wins_p0 += 1
+        elif winner == 1:
+            wins_p1 += 1
+        else:
+            draws += 1
+
+        print(
+            f"[Q vs Random] Episode {ep}/{num_episodes} "
+            f"winner={winner}  total_reward_p0={total_reward_p0:.3f}"
+        )
+
+    env.close()
+    print(
+        f"Q vs Random summary: P0(Q) wins={wins_p0}, P1(Random) wins={wins_p1}, draws={draws}"
+    )
 
 if __name__ == "__main__":
     # Choose which matchup you want to run.
     # Set render=True to print the board and move descriptions.
     #run_q_vs_random(num_episodes=500, render=True)
     # run_mc_vs_random(num_episodes=1000, render=False)
-    run_mc_vs_q(num_episodes=10000, render=False)
+    #run_mc_vs_q(num_episodes=10000, render=False)
+    run_qnet_vs_random(num_episodes=50, render=True)
