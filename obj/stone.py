@@ -1,11 +1,12 @@
 class Stone:
-    def __init__(self, name = "Stone", effect = None, n = 0, s = 0, e = 0, w = 0):
+    def __init__(self, name = "Stone", effect = None, n = 0, s = 0, e = 0, w = 0, owner = None):
         self.name = name
         self.effect = effect
         self.n = n
         self.s = s
         self.e = e
         self.w = w
+        self.owner = owner
 
     def set_Owner(self, player):
         # Keep backward compatibility: set both `owner` and `player` attributes

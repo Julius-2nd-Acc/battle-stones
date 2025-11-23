@@ -12,6 +12,20 @@ from services.state_builder import StateBuilder
 from obj.player import PlayerType
 from algorithms.agent_interface import Agent
 
+def _convert_numpy_types(obj):
+    """Recursively convert numpy types to native Python types for JSON serialization."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {_convert_numpy_types(k): _convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)(_convert_numpy_types(item) for item in obj)
+    return obj
+
 class _ActionSpace:
     def __init__(self, n: int, rng: random.Random):
         self.n = int(n)
@@ -49,7 +63,7 @@ class GameController:
             "agent_wins": {} # e.g., "q": 10, "mc": 5, "random": 2
         }
 
-    def create_game_with_players(self, rows: int = 3, cols: int = 3, player0: str = "human", player1: str = "random") -> str:
+    def create_game_with_players(self, rows: int = 3, cols: int = 3, player0: str = "human", player1: str = "random", autoplay: bool = True) -> str:
         gid = str(uuid.uuid4())
         gi = GameInstance()
         
@@ -80,8 +94,8 @@ class GameController:
 
         self.games[gid] = GameContext(gi, agents)
 
-        # Auto-start autoplay if no human players
-        if all(c.lower() != 'human' for c in controls):
+        # Auto-start autoplay if requested (default True)
+        if autoplay:
             self.start_autoplay(gid, delay=3.0)
 
         return gid
@@ -94,9 +108,13 @@ class GameController:
         gi = ctx.game
         
         state = StateBuilder.build_canonical_state(gi, player_idx)
+        print(state)
         
         winner = None
         counts = gi.board.get_current_stone_count() or {}
+        # Convert counts dict to use player names as keys instead of Player objects
+        counts_by_name = {p.name: int(count) for p, count in counts.items()}
+        
         if not ctx.started and counts: # Game Over check approximation
              # This logic is a bit duplicated from GameInstance.check_game_over but useful for API
             max_count = max(counts.values())
@@ -106,13 +124,69 @@ class GameController:
             else:
                 winner = "draw"
 
-        return {
+        # Determine current player (alternates, starts with player 0)
+        current_player_idx = None
+        awaiting_human = False
+        if gi.started:
+            # Simple heuristic: count stones played to determine whose turn
+            total_played = sum(len(gi.initial_slots.get(i, [])) - len(p.stones) for i, p in enumerate(gi.players))
+            current_player_idx = total_played % 2
+            awaiting_human = gi.players[current_player_idx].agent is None
+        
+        # Build structured board with full stone details
+        structured_board = []
+        for r in range(gi.board.rows):
+            row = []
+            for c in range(gi.board.cols):
+                cell = gi.board.getField(r, c)
+                # Check if cell has a stone (not None and not empty string ".")
+                if cell is None or cell == "." or not hasattr(cell, 'n'):
+                    row.append(None)
+                else:
+                    # cell is a Stone object
+                    owner = None
+                    if hasattr(cell, 'get_Owner'):
+                        try:
+                            owner_obj = cell.get_Owner()
+                            if owner_obj:
+                                owner = owner_obj.name
+                        except:
+                            pass
+                    
+                    row.append({
+                        "name": cell.name,
+                        "n": int(cell.n),
+                        "s": int(cell.s),
+                        "e": int(cell.e),
+                        "w": int(cell.w),
+                        "owner": cell.owner.name if hasattr(cell.owner, "name") else None
+                    })
+            structured_board.append(row)
+        
+        result = {
             "state": state,
             "started": ctx.started,
             "winner": winner,
-            "counts": {p.name: counts.get(p, 0) for p in gi.players},
-            "agents": {i: getattr(p, "_agent_info", {}) for i, p in enumerate(gi.players)},
+            "counts": counts_by_name,
+            "agents": {str(i): getattr(p, "_agent_info", {}) for i, p in enumerate(gi.players)},
+            "current_player": int(current_player_idx) if current_player_idx is not None else None,
+            "awaiting_human": awaiting_human,
+            "available_stones": [
+                {
+                    "name": s.name,
+                    "n": int(s.n),
+                    "s": int(s.s),
+                    "e": int(s.e),
+                    "w": int(s.w),
+                    "owner": s.owner.name if hasattr(s.owner, "name") else None
+                } for s in gi.players[player_idx].stones
+            ] if gi.started else [],
+            "board_size": {"rows": int(gi.board.rows), "cols": int(gi.board.cols)},
+            "board": structured_board,
         }
+        
+        # Convert any remaining numpy types to native Python types
+        return _convert_numpy_types(result)
 
     def seed(self, game_id: str, seed: Optional[int] = None) -> int:
         if seed is None:
@@ -163,6 +237,54 @@ class GameController:
             
         return self.get_state(game_id, player_idx=player_idx)
 
+    def step_human(self, game_id: str, stone_index: int, row: int, col: int, player_idx: int = 0) -> Dict[str, Any]:
+        """
+        Human-friendly step method that accepts stone index and board position.
+        Validates input and translates to action before calling step().
+        """
+        ctx = self.games[game_id]
+        gi = ctx.game
+        
+        # Validate player has stones
+        player = gi.players[player_idx]
+        if not player.stones:
+            raise ValueError(f"Player {player_idx} has no stones left")
+        
+        # Validate stone_index
+        if stone_index < 0 or stone_index >= len(player.stones):
+            raise ValueError(f"Invalid stone_index: must be between 0 and {len(player.stones) - 1}")
+        
+        # Get the stone at this index
+        chosen_stone = player.stones[stone_index]
+        
+        # Validate board position
+        rows = gi.board.rows
+        cols = gi.board.cols
+        if row < 0 or row >= rows:
+            raise ValueError(f"Invalid row: must be between 0 and {rows - 1}")
+        if col < 0 or col >= cols:
+            raise ValueError(f"Invalid col: must be between 0 and {cols - 1}")
+        
+        # Validate cell is empty
+        if not gi.board.isValidMove((row, col)):
+            raise ValueError(f"Cell ({row}, {col}) is already occupied or invalid")
+        
+        # Find slot index for this stone
+        slot = None
+        for slot_idx, slot_name in enumerate(gi.initial_slots.get(player_idx, [])):
+            if chosen_stone.name == slot_name:
+                slot = slot_idx
+                break
+        
+        if slot is None:
+            raise ValueError(f"Stone '{chosen_stone.name}' not found in initial slots")
+        
+        # Compute action: slot * (rows * cols) + (row * cols + col)
+        action = slot * (rows * cols) + (row * cols + col)
+        
+        # Use existing step method
+        return self.step(game_id, action, player_idx)
+
     def delete_game(self, game_id: str) -> bool:
         self.stop_autoplay(game_id)
         if game_id in self.games:
@@ -184,47 +306,51 @@ class GameController:
             ctx.game.started = True # Sync
             try:
                 while ctx.started and not stop_event.is_set():
-                    # Determine whose turn it is? 
-                    # The GameInstance doesn't strictly track "current player" index in a variable, 
-                    # it usually iterates. But here we need to know who moves next.
-                    # We'll just iterate players and try to move if they have stones.
+                    # Determine whose turn it is based on stones played
+                    total_played = sum(len(ctx.game.initial_slots.get(i, [])) - len(p.stones) 
+                                     for i, p in enumerate(ctx.game.players))
+                    current_player_idx = total_played % 2
                     
-                    moves_made = 0
-                    for p_idx, player in enumerate(ctx.game.players):
-                        if stop_event.is_set() or not ctx.started: break
-                        
-                        if len(player.stones) == 0: continue
-                        
-                        agent = ctx.agents[p_idx]
-                        if agent is None: continue # Human player, skip in autoplay
-                        
-                        # Get Observation
-                        obs = StateBuilder.build_gym_observation(ctx.game, p_idx)
-                        
-                        # Get Legal Actions
-                        legal_actions = self._get_legal_actions(ctx.game, p_idx)
-                        
-                        if not legal_actions: continue
-                        
-                        # Ask Player (who delegates to Agent)
-                        try:
-                            action = player.choose_action(obs, legal_actions)
-                            self.step(game_id, action, p_idx)
-                            moves_made += 1
-                            time.sleep(max(0.0, float(delay)))
-                        except Exception as e:
-                            self.logger.error(f"Agent error: {e}")
-                            
-                    if moves_made == 0:
-                        # Game might be over or stuck
+                    # Check if game is over
+                    if not ctx.game.started:
+                        ctx.started = False
+                        self._update_stats(ctx.game)
+                        break
+                    
+                    # Check if current player has stones left
+                    current_player = ctx.game.players[current_player_idx]
+                    if len(current_player.stones) == 0:
+                        # This player is out of stones, game should be over
                         ctx.game.check_game_over()
                         if not ctx.game.started:
                             ctx.started = False
                             self._update_stats(ctx.game)
                             break
-                        # If no one moved but game is started, maybe waiting for human?
-                        # Just sleep a bit to avoid busy loop
                         time.sleep(0.1)
+                        continue
+                    
+                    # Check if current player is AI
+                    agent = ctx.agents[current_player_idx]
+                    if agent is None:
+                        # Human player's turn - pause autoplay
+                        time.sleep(0.1)
+                        continue
+                    
+                    # Make ONE move for the current AI player
+                    obs = StateBuilder.build_gym_observation(ctx.game, current_player_idx)
+                    legal_actions = self._get_legal_actions(ctx.game, current_player_idx)
+                    
+                    if not legal_actions:
+                        time.sleep(0.1)
+                        continue
+                    
+                    try:
+                        action = current_player.choose_action(obs, legal_actions)
+                        self.step(game_id, action, current_player_idx)
+                        time.sleep(max(0.0, float(delay)))
+                    except Exception as e:
+                        self.logger.error(f"Agent error: {e}")
+                        break
 
             finally:
                 self._runners.pop(game_id, None)
@@ -278,7 +404,8 @@ class GameController:
         if control == 'mc':
             try:
                 from algorithms.greedy_mc import MCAgent
-                model_path = os.path.join('models', 'mc_agent_skystones.pkl')
+                filename = f"mc_agent_{rows}x{cols}.pkl.gz"
+                model_path = os.path.join('models', filename)
                 if os.path.exists(model_path):
                     agent = MCAgent.load(model_path, action_space)
                     self.logger.info(f"Loaded MCAgent from {model_path}")
@@ -292,7 +419,8 @@ class GameController:
         if control in ('qlearn', 'q'):
             try:
                 from algorithms.q_learning import QLearningAgent
-                model_path = os.path.join('models', 'q_agent_skystones.pkl')
+                filename = f"q_agent_{rows}x{cols}.pkl.gz"
+                model_path = os.path.join('models', filename)
                 if os.path.exists(model_path):
                     agent = QLearningAgent.load(model_path, action_space)
                     self.logger.info(f"Loaded QLearningAgent from {model_path}")
@@ -335,4 +463,3 @@ class GameController:
             self.stats["agent_wins"][atype] = self.stats["agent_wins"].get(atype, 0) + 1
         else:
             self.stats["agent_wins"]["draw"] = self.stats["agent_wins"].get("draw", 0) + 1
-

@@ -40,18 +40,49 @@ class GameInstance:
             self.initial_slots[i] = names
     
     def generate_stones_for_player(self, player:Player):
-        # Use a deterministic set of four stones for all players so training and
-        # inference are reproducible. Values chosen arbitrarily.
-        fixed_stats = [
-            (2, 1, 1, 0),  # Stone A: n=2,s=1,e=1,w=0
-            (1, 2, 1, 0),  # Stone B
-            (1, 2, 1, 0), # Stone C
-            (0, 1, 3, 2),  # Stone D
+        # Define 4 distinct sets of 5 stones with thematic names
+        stone_sets = [
+            # Set 1: The Order (Balanced)
+            [
+                ("Squire", 1, 3, 1, 1), 
+                ("Archer", 1, 2, 2, 1), 
+                ("Cleric", 1, 1, 2, 2), 
+                ("Knight", 2, 1, 1, 2), 
+                ("Hero", 2, 2, 2, 2)
+            ],
+            # Set 2: The Horde (Aggressive)
+            [
+                ("Goblin", 1, 1, 1, 1), 
+                ("Orc",2, 1, 1, 2), 
+                ("Berserker", 3, 3, 0, 0), 
+                ("Raider", 0, 0, 3, 3), 
+                ("Warlord", 2, 2, 2, 0)
+            ],
+            # Set 3: The Guard (Defensive)
+            [
+                ("Sentry", 1, 1, 1, 1), 
+                ("Shield", 1, 1, 3, 1), 
+                ("Wall", 1, 3, 1, 1), 
+                ("Tower", 3, 1, 1, 1), 
+                ("Bastion", 1, 2, 2, 1)
+            ],
+            # Set 4: The Void (Chaos)
+            [
+                ("Shadow", 0, 0, 4, 2), 
+                 ("Imp", 1,1,1,1), 
+                ("Imp", 1, 1, 1, 1), 
+                ("Vortex", 3, 0, 0, 3), 
+                ("Dragon", 0, 3, 3, 0)
+            ]
         ]
-        for i, (n, s, e, w) in enumerate(fixed_stats):
+        
+        # Randomly select one set for this player
+        selected_set = random.choice(stone_sets)
+        
+        for name, n, s, e, w in selected_set:
             # name includes player name for clarity and uniqueness
-            stone_name = f"{player.name} Stone {chr(65 + i)}"
-            stone = Stone(name=stone_name, n=n, s=s, e=e, w=w)
+            stone_name = f"{player.name} {name}"
+            stone = Stone(name=stone_name, n=n, s=s, e=e, w=w, owner=player.name)
             player.add_stone(stone)
 
     def get_canonical_state(self, player_idx: int):
@@ -86,8 +117,9 @@ class GameInstance:
             for r in range(self.board.rows)
             for c in range(self.board.cols)
         )
+        placed_stone_count = self.placed_stone_count()
 
-        if no_player_stones or no_empty_fields:
+        if no_player_stones or no_empty_fields or placed_stone_count == 8:
             # Obtain stone counts for all players (dict player -> count)
             owner_counts = self.board.get_current_stone_count()
 

@@ -19,36 +19,23 @@ class SkystonesEnv(gym.Env):
 
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, capture_reward: float = 1.0):
+    def __init__(self, render_mode=None, capture_reward: float = 1.0, rows: int = 3, cols: int = 3):
         super().__init__()
         self.render_mode = render_mode
         self.capture_reward = capture_reward
+        self.rows = rows
+        self.cols = cols
 
         # Use a temporary game to infer board and stone info
         tmp_game = GameInstance()
-        tmp_game.setup_game(col=3, row=3)
-        self.rows = tmp_game.board.rows
-        self.cols = tmp_game.board.cols
+        tmp_game.setup_game(col=cols, row=rows)
+        # self.rows/cols already set above
         self.max_slots = max(len(slots) for slots in tmp_game.initial_slots.values())
 
         # Build a mapping from stone (n,s,e,w) -> type_id
-        # Note: This logic is now partially duplicated in StateBuilder, 
-        # but we need num_types for the observation space definition.
-        self.attr_to_type = {}
-        type_id = 0
-        for p_idx, slot_names in tmp_game.initial_slots.items():
-            player = tmp_game.players[p_idx]
-            for name in slot_names:
-                if name is None:
-                    continue
-                stone_obj = next((s for s in player.stones if s.name == name), None)
-                if stone_obj is None:
-                    continue
-                attrs = stone_obj.get_Attributes()  # (n,s,e,w)
-                if attrs not in self.attr_to_type:
-                    self.attr_to_type[attrs] = type_id
-                    type_id += 1
-        self.num_types = type_id
+        # Note: We now use direct stats in the observation, so this registry 
+        # is no longer needed for the observation space, but we keep the 
+        # max_slots calculation above.
 
         # Underlying game (created on reset)
         self.game = None
@@ -58,28 +45,28 @@ class SkystonesEnv(gym.Env):
         self.action_space = spaces.Discrete(self.max_slots * self.rows * self.cols)
 
         # Observation:
-        # - board_owner: 0 empty, 1 player0, 2 player1
-        # - board_type: -1 empty, otherwise 0..num_types-1
-        # - hand_types: -1 empty slot, otherwise 0..num_types-1
+        # - ownership: 0 empty, 1 player0, 2 player1
+        # - board_stats: (rows, cols, 4) -> (n, s, e, w) values
+        # - hand_stats: (2, max_slots, 4) -> (n, s, e, w) values
         # - to_move: which player (0 or 1)
         self.observation_space = spaces.Dict(
             {
-                "board_owner": spaces.Box(
+                "ownership": spaces.Box(
                     low=0,
                     high=2,
                     shape=(self.rows, self.cols),
                     dtype=np.int8,
                 ),
-                "board_type": spaces.Box(
-                    low=-1,
-                    high=self.num_types - 1,
-                    shape=(self.rows, self.cols),
+                "board_stats": spaces.Box(
+                    low=0,
+                    high=20, # Assuming stats don't exceed 20
+                    shape=(self.rows, self.cols, 4),
                     dtype=np.int8,
                 ),
-                "hand_types": spaces.Box(
-                    low=-1,
-                    high=self.num_types - 1,
-                    shape=(2, self.max_slots),
+                "hand_stats": spaces.Box(
+                    low=0,
+                    high=20,
+                    shape=(2, self.max_slots, 4),
                     dtype=np.int8,
                 ),
                 "to_move": spaces.Discrete(2),

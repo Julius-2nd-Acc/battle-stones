@@ -16,7 +16,14 @@ class CreateGameRequest(BaseModel):
 
 
 class StepRequest(BaseModel):
-    action: int
+    # Option 1: Direct action (backward compatible)
+    action: Optional[int] = None
+    
+    # Option 2: Human-friendly format
+    stone_index: Optional[int] = None
+    row: Optional[int] = None
+    col: Optional[int] = None
+    
     player_idx: int = 0
 
 
@@ -74,8 +81,31 @@ def get_game(game_id: str, player_idx: int = 0):
 def step_game(game_id: str, req: StepRequest):
     if game_id not in controller.games:
         raise HTTPException(status_code=404, detail="game not found")
-    result = controller.step(game_id, req.action, player_idx=req.player_idx)
-    return result
+    
+    try:
+        # Validate that exactly one format is provided
+        has_action = req.action is not None
+        has_human_format = all(x is not None for x in [req.stone_index, req.row, req.col])
+        
+        if has_action and has_human_format:
+            raise HTTPException(status_code=400, detail="Provide either 'action' OR 'stone_index'+'row'+'col', not both")
+        if not has_action and not has_human_format:
+            raise HTTPException(status_code=400, detail="Must provide either 'action' OR all of 'stone_index', 'row', 'col'")
+        
+        # Use appropriate method based on format
+        if has_human_format:
+            result = controller.step_human(game_id, req.stone_index, req.row, req.col, req.player_idx)
+        else:
+            result = controller.step(game_id, req.action, player_idx=req.player_idx)
+        
+        # Auto-resume autoplay if it was running and next player is AI
+        if controller.is_autoplaying(game_id):
+            # Autoplay thread will handle AI moves automatically
+            pass
+        
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/games/{game_id}/seed")

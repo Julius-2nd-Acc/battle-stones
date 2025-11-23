@@ -1,5 +1,6 @@
 import random
 import pickle
+import gzip
 from collections import defaultdict
 from typing import Any, List
 
@@ -12,11 +13,11 @@ def obs_to_state(obs) -> tuple:
     Convert SkystonesEnv observation dict into a hashable state key (tuple).
     Matches the current observation structure in SkystonesEnv.
     """
-    board_owner_flat = tuple(obs["board_owner"].astype(int).ravel())
-    board_type_flat = tuple(obs["board_type"].astype(int).ravel())
-    hand_flat = tuple(obs["hand_types"].astype(int).ravel())
+    ownership_flat = tuple(obs["ownership"].astype(int).ravel())
+    board_stats_flat = tuple(obs["board_stats"].astype(int).ravel())
+    hand_stats_flat = tuple(obs["hand_stats"].astype(int).ravel())
     to_move = int(obs["to_move"])
-    return board_owner_flat + board_type_flat + hand_flat + (to_move,)
+    return ownership_flat + board_stats_flat + hand_stats_flat + (to_move,)
 
 
 class QLearningAgent(Agent):
@@ -147,12 +148,14 @@ class QLearningAgent(Agent):
             "epsilon": self.epsilon,
             "Q": {state: q.tolist() for state, q in self.Q.items()},
         }
-        with open(filepath, "wb") as f:
+        # Use gzip for compression
+        with gzip.open(filepath, "wb") as f:
             pickle.dump(data, f)
 
     @classmethod
     def load(cls, filepath: str, action_space):
-        with open(filepath, "rb") as f:
+        # Use gzip for decompression
+        with gzip.open(filepath, "rb") as f:
             data = pickle.load(f)
 
         agent = cls(

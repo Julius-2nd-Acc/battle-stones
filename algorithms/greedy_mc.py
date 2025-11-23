@@ -1,5 +1,6 @@
 import random
 import pickle
+import gzip
 from collections import defaultdict
 from typing import Any, List
 
@@ -11,11 +12,11 @@ def obs_to_state(obs) -> tuple:
     Convert SkystonesEnv observation dict into a hashable state key (tuple).
     Matches the *current* observation structure in SkystonesEnv.
     """
-    board_owner_flat = tuple(obs["board_owner"].astype(int).ravel())
-    board_type_flat = tuple(obs["board_type"].astype(int).ravel())
-    hand_flat = tuple(obs["hand_types"].astype(int).ravel())
+    ownership_flat = tuple(obs["ownership"].astype(int).ravel())
+    board_stats_flat = tuple(obs["board_stats"].astype(int).ravel())
+    hand_stats_flat = tuple(obs["hand_stats"].astype(int).ravel())
     to_move = int(obs["to_move"])
-    return board_owner_flat + board_type_flat + hand_flat + (to_move,)
+    return ownership_flat + board_stats_flat + hand_stats_flat + (to_move,)
 
 class MCAgent(Agent):
     """
@@ -133,7 +134,7 @@ class MCAgent(Agent):
 
     def save(self, filepath: str):
         """
-        Save the agent to disk.
+        Save the agent to disk using gzip compression.
         """
         data = {
             "gamma": self.gamma,
@@ -142,15 +143,15 @@ class MCAgent(Agent):
             "returns_sum": dict(self.returns_sum),
             "returns_count": dict(self.returns_count),
         }
-        with open(filepath, "wb") as f:
+        with gzip.open(filepath, "wb") as f:
             pickle.dump(data, f)
 
     @classmethod
     def load(cls, filepath: str, action_space):
         """
-        Load an agent from disk. You must pass the env's action_space.
+        Load an agent from disk using gzip decompression.
         """
-        with open(filepath, "rb") as f:
+        with gzip.open(filepath, "rb") as f:
             data = pickle.load(f)
 
         agent = cls(
