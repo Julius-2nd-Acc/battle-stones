@@ -15,7 +15,7 @@ def train_mc(
     if model_path is None:
         model_path = f"models/mc_agent_{rows}x{cols}.pkl.gz"
         
-    env = SkystonesEnv(render_mode=None, capture_reward=1.0, rows=rows, cols=cols)
+    env = SkystonesEnv(render_mode=None, capture_reward=2.0, rows=rows, cols=cols)
     
     if os.path.exists(model_path):
         print(f"Loading existing model from {model_path}...")

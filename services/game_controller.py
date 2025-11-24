@@ -431,6 +431,10 @@ class GameController:
                 self.logger.error(f"Failed to import Q agent: {e}")
                 raise ValueError(f"Q-learning agent implementation not found: {e}")
 
+        if control == 'medium':
+            from algorithms.medium_agent import MediumAgent
+            return MediumAgent(action_space), None
+
         if control == 'random':
             return RandomAgent(action_space), None
 

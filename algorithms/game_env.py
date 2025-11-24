@@ -137,7 +137,6 @@ class SkystonesEnv(gym.Env):
         p0_after = owner_counts_after.get(self.game.players[0], 0)
 
         delta_p0 = p0_after - p0_before
-
         # Compute capture/loss reward from Player 0 perspective
         # - If P0 moves: delta_p0 = 1 (new stone) + #captured_from_P1
         #   so captures = delta_p0 - 1

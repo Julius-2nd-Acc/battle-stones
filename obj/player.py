@@ -7,6 +7,7 @@ class PlayerType(Enum):
     RANDOM = 1
     MC = 2
     Q = 3
+    MEDIUM = 4
 
 class Player:
     def __init__(self, name: str, player_type: PlayerType, stones: list | None = None):
