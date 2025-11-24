@@ -11,13 +11,21 @@ class Trainer:
             env: SkystonesEnv,
             model_path: str,
             save_interval: int = 5000,
-            log_interval: int = 1000
+            log_interval: int = 1000,
+            opponent: Agent | None = None
         ):
         self.agent = agent
         self.env = env
         self.model_path = Path(model_path)
         self.save_interval = save_interval
         self.log_interval = log_interval
+        
+        # Default to RandomAgent if no opponent provided
+        if opponent is None:
+            from algorithms.random_agent import RandomAgent
+            self.opponent = RandomAgent(env.action_space)
+        else:
+            self.opponent = opponent
         
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -48,11 +56,8 @@ class Trainer:
                     else:
                         action = self.agent.choose_action(obs, legal_actions)
                 else:
-                    # Random opponent for Player 1
-                    if legal_actions:
-                        action = random.choice(legal_actions)
-                    else:
-                        action = self.env.action_space.sample()
+                    # Opponent controls Player 1
+                    action = self.opponent.choose_action(obs, legal_actions)
 
                 next_obs, reward, terminated, truncated, info = self.env.step(action)
                 done = terminated or truncated

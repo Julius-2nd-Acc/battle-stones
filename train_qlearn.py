@@ -37,7 +37,7 @@ def train_qlearning(
         agent=agent,
         env=env,
         model_path=model_path,
-        save_interval=5000,
+        save_interval=1000000,
         log_interval=1000
     )
     
@@ -47,4 +47,4 @@ def train_qlearning(
 
 
 if __name__ == "__main__":
-    train_qlearning(rows=3, cols=3, epsilon_start = 0.7, num_episodes=10000)
+    train_qlearning(rows=3, cols=3, epsilon_start = 0.7, num_episodes=100000)

@@ -43,36 +43,36 @@ class GameInstance:
         # Define 4 distinct sets of 5 stones with thematic names
         stone_sets = [
             # Set 1: The Order (Balanced)
-            [
-                ("Squire", 1, 3, 1, 1), 
-                ("Archer", 1, 2, 2, 1), 
-                ("Cleric", 1, 1, 2, 2), 
-                ("Knight", 2, 1, 1, 2), 
-                ("Hero", 2, 2, 2, 2)
-            ],
+            #[
+            #    ("Squire", 1, 3, 1, 1), 
+            #    ("Archer", 1, 2, 2, 1), 
+            #    ("Cleric", 1, 1, 2, 2), 
+            #    ("Knight", 2, 1, 1, 2), 
+            #    ("Hero", 2, 2, 2, 2)
+            #],
             # Set 2: The Horde (Aggressive)
-            [
-                ("Goblin", 1, 1, 1, 1), 
-                ("Orc",2, 1, 1, 2), 
-                ("Berserker", 3, 3, 0, 0), 
-                ("Raider", 0, 0, 3, 3), 
-                ("Warlord", 2, 2, 2, 0)
-            ],
+            #[
+            #    ("Goblin", 1, 1, 1, 1), 
+            #    ("Orc",2, 1, 1, 2), 
+            #    ("Berserker", 3, 3, 0, 0), 
+            #    ("Raider", 0, 0, 3, 3), 
+            #    ("Warlord", 2, 2, 2, 0)
+            #],
             # Set 3: The Guard (Defensive)
-            [
-                ("Sentry", 1, 1, 1, 1), 
-                ("Shield", 1, 1, 3, 1), 
-                ("Wall", 1, 3, 1, 1), 
-                ("Tower", 3, 1, 1, 1), 
-                ("Bastion", 1, 2, 2, 1)
-            ],
+            #[
+             #   ("Sentry", 1, 1, 1, 1), 
+             #   ("Shield", 1, 1, 3, 1), 
+             #   ("Wall", 1, 3, 1, 1), 
+             #   ("Tower", 3, 1, 1, 1), 
+             #   ("Bastion", 1, 2, 2, 1)
+            #],
             # Set 4: The Void (Chaos)
             [
-                ("Shadow", 0, 0, 4, 2), 
-                 ("Imp", 1,1,1,1), 
-                ("Imp", 1, 1, 1, 1), 
-                ("Vortex", 3, 0, 0, 3), 
-                ("Dragon", 0, 3, 3, 0)
+               ("Shadow", 0, 0, 4, 2), 
+                ("Imp", 1,1,1,1), 
+               ("Imp", 1, 1, 1, 1), 
+              ("Vortex", 3, 0, 0, 3), 
+               ("Dragon", 0, 3, 3, 0)
             ]
         ]
         
