@@ -43,7 +43,7 @@ class QLearningAgent(Agent):
         self.Q = defaultdict(self._zeros_for_state)
 
     def _zeros_for_state(self):
-        return np.zeros(self.action_space.n, dtype=np.float32)
+        return np.zeros(self.action_space.n, dtype=np.float16)
     
     def choose_action(self, observation: Any, legal_actions: List[int] | None = None) -> int:
         """
@@ -167,6 +167,6 @@ class QLearningAgent(Agent):
 
         agent.Q = defaultdict(
             agent._zeros_for_state,
-            {state: np.array(q, dtype=np.float32) for state, q in data["Q"].items()},
+            {state: np.array(q, dtype=np.float16) for state, q in data["Q"].items()},
         )
         return agent

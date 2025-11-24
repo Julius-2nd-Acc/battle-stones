@@ -37,7 +37,7 @@ class MCAgent(Agent):
         self.returns_count = defaultdict(int)   # (s,a) -> count of returns
 
     def _zeros_for_state(self):
-        return np.zeros(self.action_space.n, dtype=np.float32)
+        return np.zeros(self.action_space.n, dtype=np.float16)
     
     def choose_action(self, observation: Any, legal_actions: List[int] | None = None) -> int:
         """
@@ -162,7 +162,7 @@ class MCAgent(Agent):
 
         agent.Q = defaultdict(
             agent._zeros_for_state,
-            {state: np.array(q, dtype=np.float32) for state, q in data["Q"].items()},
+            {state: np.array(q, dtype=np.float16) for state, q in data["Q"].items()},
         )
         agent.returns_sum = defaultdict(float, data["returns_sum"])
         agent.returns_count = defaultdict(int, data["returns_count"])

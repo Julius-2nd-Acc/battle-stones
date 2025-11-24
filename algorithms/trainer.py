@@ -48,27 +48,27 @@ class Trainer:
                 player_to_act = self.env.current_player_idx
                 legal_actions = self.env.get_legal_actions(player_to_act)
                 
-                if player_to_act == 0:
-                    # Agent controls Player 0
+                if player_to_act == 1:
+                    # Agent controls Player 1
                     # Use policy_action_masked if available for exploration (epsilon-greedy)
                     if hasattr(self.agent, 'policy_action_masked'):
                         action = self.agent.policy_action_masked(obs, legal_actions)
                     else:
                         action = self.agent.choose_action(obs, legal_actions)
                 else:
-                    # Opponent controls Player 1
+                    # Opponent controls Player 0
                     action = self.opponent.choose_action(obs, legal_actions)
 
                 next_obs, reward, terminated, truncated, info = self.env.step(action)
                 done = terminated or truncated
                 
-                # Track data for MC
-                if hasattr(self.agent, 'get_state_key'):
+                # Track data for MC only for agent's moves
+                if player_to_act == 1 and hasattr(self.agent, 'get_state_key'):
                      state_key = self.agent.get_state_key(obs)
                      episode_data.append((state_key, action, reward))
 
-                # Q-Learning Update (Online)
-                if player_to_act == 0 and hasattr(self.agent, 'update'):
+                # Q-Learning Update (Online) -- update when agent acted (player 1)
+                if player_to_act == 1 and hasattr(self.agent, 'update'):
                     legal_next = self.env.get_legal_actions() if not done else []
                     self.agent.update(obs, action, reward, next_obs, done, legal_next_actions=legal_next)
 
