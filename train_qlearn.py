@@ -16,7 +16,7 @@ def train_qlearning(
     if model_path is None:
         model_path = f"models/q_agent_{rows}x{cols}.pkl.gz"
 
-    env = SkystonesEnv(render_mode=None, capture_reward=1.0, rows=rows, cols=cols)
+    env = SkystonesEnv(render_mode=None, capture_reward=0.5, rows=rows, cols=cols)
 
     if os.path.exists(model_path):
         print(f"Loading existing model from {model_path}...")
@@ -31,16 +31,16 @@ def train_qlearning(
         )
     
     # Inject decay params into agent for Trainer to use
-    agent.epsilon_min = 0.10
+    agent.epsilon_min = 0.4
     agent.epsilon_decay = 0.999
-    opponent = MixAgent(action_space=env.action_space, epsilon=0.5)
+    opponent = MixAgent(action_space=env.action_space, epsilon=0.7)
 
     trainer = Trainer(
         agent=agent,
         env=env,
         model_path=model_path,
         save_interval=1000000,
-        log_interval=1000,
+        log_interval=10000,
         opponent= opponent
     )
     
@@ -50,4 +50,4 @@ def train_qlearning(
 
 
 if __name__ == "__main__":
-    train_qlearning(rows=3, cols=3, epsilon_start = 0.7, num_episodes=100000)
+    train_qlearning(rows=4, cols=4, epsilon_start = 0.7, num_episodes=400000)

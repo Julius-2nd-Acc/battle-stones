@@ -2,10 +2,11 @@ import random
 import pickle
 import gzip
 from collections import defaultdict
-from typing import Any, List
+from typing import Any, List, Tuple
 
 import numpy as np
 from algorithms.agent_interface import Agent
+from services.compact_state import CompactStateBuilder
 
 
 def obs_to_state(obs) -> tuple:
@@ -13,11 +14,29 @@ def obs_to_state(obs) -> tuple:
     Convert SkystonesEnv observation dict into a hashable state key (tuple).
     Matches the current observation structure in SkystonesEnv.
     """
-    ownership_flat = tuple(obs["ownership"].astype(int).ravel())
-    board_stats_flat = tuple(obs["board_stats"].astype(int).ravel())
-    hand_stats_flat = tuple(obs["hand_stats"].astype(int).ravel())
+    ownership = obs["ownership"]
+    board_stats = obs["board_stats"]
+    hand_stats = obs["hand_stats"]
     to_move = int(obs["to_move"])
-    return ownership_flat + board_stats_flat + hand_stats_flat + (to_move,)
+
+    # Normalize ownership
+    me_id = to_move + 1
+    # Create a copy or new array for normalized ownership
+    # 0 -> 0
+    # me_id -> 1
+    # other -> 2
+    norm_ownership = np.zeros_like(ownership)
+    norm_ownership[ownership == me_id] = 1
+    norm_ownership[(ownership != 0) & (ownership != me_id)] = 2
+    
+    ownership_flat = tuple(norm_ownership.astype(int).ravel())
+    board_stats_flat = tuple(board_stats.astype(int).ravel())
+    
+    # Normalize hands
+    my_hand = tuple(hand_stats[to_move].astype(int).ravel())
+    opp_hand = tuple(hand_stats[1 - to_move].astype(int).ravel())
+    
+    return ownership_flat + board_stats_flat + my_hand + opp_hand
 
 
 class QLearningAgent(Agent):
@@ -33,11 +52,13 @@ class QLearningAgent(Agent):
         alpha: float = 0.1,
         gamma: float = 0.99,
         epsilon: float = 0.1,
+        use_compact_state: bool = True
     ):
         self.action_space = action_space
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
+        self.use_compact_state = use_compact_state
 
         # Q(s)[a] = value
         self.Q = defaultdict(self._zeros_for_state)
@@ -57,6 +78,8 @@ class QLearningAgent(Agent):
     # --------- state / policy helpers --------- #
 
     def get_state_key(self, obs):
+        if self.use_compact_state:
+            return CompactStateBuilder.build_compact_state_key(obs)
         return obs_to_state(obs)
 
     # Unmasked (fallback) versions, if you ever want them
@@ -146,6 +169,7 @@ class QLearningAgent(Agent):
             "alpha": self.alpha,
             "gamma": self.gamma,
             "epsilon": self.epsilon,
+            "use_compact_state": self.use_compact_state,
             "Q": {state: q.tolist() for state, q in self.Q.items()},
         }
         # Use gzip for compression
@@ -158,11 +182,15 @@ class QLearningAgent(Agent):
         with gzip.open(filepath, "rb") as f:
             data = pickle.load(f)
 
+        # Handle legacy models
+        use_compact = data.get("use_compact_state", False)
+
         agent = cls(
             action_space=action_space,
             alpha=data["alpha"],
             gamma=data["gamma"],
             epsilon=data["epsilon"],
+            use_compact_state=use_compact
         )
 
         agent.Q = defaultdict(

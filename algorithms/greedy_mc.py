@@ -2,15 +2,16 @@ import random
 import pickle
 import gzip
 from collections import defaultdict
-from typing import Any, List
+from typing import Any, List, Tuple
 
 import numpy as np
 from algorithms.agent_interface import Agent
+from services.compact_state import CompactStateBuilder
 
 def obs_to_state(obs) -> tuple:
     """
     Convert SkystonesEnv observation dict into a hashable state key (tuple).
-    Matches the *current* observation structure in SkystonesEnv.
+    Matches the current observation structure in SkystonesEnv.
     """
     ownership_flat = tuple(obs["ownership"].astype(int).ravel())
     board_stats_flat = tuple(obs["board_stats"].astype(int).ravel())
@@ -24,10 +25,17 @@ class MCAgent(Agent):
     Q: state -> action values (tabular)
     """
 
-    def __init__(self, action_space, gamma: float = 0.99, epsilon: float = 0.1):
+    def __init__(
+        self, 
+        action_space, 
+        gamma: float = 0.99, 
+        epsilon: float = 0.1,
+        use_compact_state: bool = True
+    ):
         self.action_space = action_space
         self.gamma = gamma
         self.epsilon = epsilon
+        self.use_compact_state = use_compact_state
 
         # Q(s)[a] = value
         self.Q = defaultdict(self._zeros_for_state)
@@ -51,6 +59,8 @@ class MCAgent(Agent):
     # --------- policy / state helpers --------- #
 
     def get_state_key(self, obs):
+        if self.use_compact_state:
+            return CompactStateBuilder.build_compact_state_key(obs)
         return obs_to_state(obs)
     
     def policy_action_masked(self, obs, legal_actions):
@@ -139,6 +149,7 @@ class MCAgent(Agent):
         data = {
             "gamma": self.gamma,
             "epsilon": self.epsilon,
+            "use_compact_state": self.use_compact_state,
             "Q": {state: q.tolist() for state, q in self.Q.items()},
             "returns_sum": dict(self.returns_sum),
             "returns_count": dict(self.returns_count),
@@ -154,10 +165,14 @@ class MCAgent(Agent):
         with gzip.open(filepath, "rb") as f:
             data = pickle.load(f)
 
+        # Handle legacy models
+        use_compact = data.get("use_compact_state", False)
+
         agent = cls(
             action_space=action_space,
             gamma=data["gamma"],
             epsilon=data["epsilon"],
+            use_compact_state=use_compact
         )
 
         agent.Q = defaultdict(

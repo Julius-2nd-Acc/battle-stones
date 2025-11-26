@@ -38,14 +38,14 @@ def train_mc(
     agent.epsilon_min = 0.10
     agent.epsilon_decay = 0.999
     
-    opponent = MixAgent(action_space=env.action_space, epsilon=0.5) if opponent is None else opponent
+    opponent = MixAgent(action_space=env.action_space, epsilon=0.4) if opponent is None else opponent
 
     trainer = Trainer(
         agent=agent,
         env=env,
         model_path=model_path,
         save_interval=500000,
-        log_interval=100000,
+        log_interval=10000,
         opponent=opponent
     )
     
@@ -58,14 +58,14 @@ if __name__ == "__main__":
     # Example: Train a new "challenger" agent against the existing "champion" (if it exists)
     # This will save the new agent to 'models/mc_agent_challenger.pkl.gz'
     
-    champion_path = "models/mc_agent_3x3.pkl.gz"
+    champion_path = "models/mc_agent_4x4.pkl.gz"
     challenger_path = "models/mc_agent_challenger.pkl.gz"
 
     train_mc(
-            rows=3, 
-            cols=3, 
+            rows=4, 
+            cols=4, 
             epsilon_start=0.7, 
-            num_episodes=500000,
+            num_episodes=1000,
             model_path=champion_path      # Save as the first champion
         )
     
