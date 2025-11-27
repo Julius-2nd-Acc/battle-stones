@@ -431,9 +431,37 @@ class GameController:
                 self.logger.error(f"Failed to import Q agent: {e}")
                 raise ValueError(f"Q-learning agent implementation not found: {e}")
 
+        if control in ('reinforce', 'rf'):
+            try:
+                from algorithms.reinforce_agent import ReinforceAgent
+                filename = "reinforce_agent.pth"
+                model_path = os.path.join('models', filename)
+                if os.path.exists(model_path):
+                    # Calculate input dimension
+                    input_dim = (rows * cols) + (rows * cols * 4) + (2 * max_slots * 4)
+                    agent = ReinforceAgent(
+                        action_space=action_space,
+                        input_dim=input_dim,
+                        gamma=0.99,
+                        lr=1e-3,
+                        hidden_dim=256  # Match training config
+                    )
+                    agent.load(model_path)
+                    self.logger.info(f"Loaded ReinforceAgent from {model_path}")
+                    return agent, model_path
+                else:
+                    raise FileNotFoundError(f"REINFORCE agent model not found at {model_path}")
+            except ImportError as e:
+                self.logger.error(f"Failed to import REINFORCE agent: {e}")
+                raise ValueError(f"REINFORCE agent implementation not found: {e}")
+
         if control == 'medium':
             from algorithms.medium_agent import MediumAgent
             return MediumAgent(action_space), None
+
+        if control == 'mcts':
+            from algorithms.mcts_agent import MCTSAgent
+            return MCTSAgent(action_space, simulations=1000), None
 
         if control == 'random':
             return RandomAgent(action_space), None

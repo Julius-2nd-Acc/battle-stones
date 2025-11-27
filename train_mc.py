@@ -46,7 +46,8 @@ def train_mc(
         model_path=model_path,
         save_interval=500000,
         log_interval=10000,
-        opponent=opponent
+        opponent=opponent,  
+        randomize_player=True
     )
     
     trainer.train(num_episodes)
@@ -58,14 +59,14 @@ if __name__ == "__main__":
     # Example: Train a new "challenger" agent against the existing "champion" (if it exists)
     # This will save the new agent to 'models/mc_agent_challenger.pkl.gz'
     
-    champion_path = "models/mc_agent_4x4.pkl.gz"
+    champion_path = "models/mc_agent_3x3.pkl.gz"
     challenger_path = "models/mc_agent_challenger.pkl.gz"
 
     train_mc(
-            rows=4, 
-            cols=4, 
+            rows=3, 
+            cols=3, 
             epsilon_start=0.7, 
-            num_episodes=1000,
+            num_episodes=100000,
             model_path=champion_path      # Save as the first champion
         )
     

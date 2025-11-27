@@ -33,15 +33,16 @@ def train_qlearning(
     # Inject decay params into agent for Trainer to use
     agent.epsilon_min = 0.4
     agent.epsilon_decay = 0.999
-    opponent = MixAgent(action_space=env.action_space, epsilon=0.7)
+    opponent = MixAgent(action_space=env.action_space, epsilon=0.4)
 
     trainer = Trainer(
         agent=agent,
         env=env,
         model_path=model_path,
-        save_interval=1000000,
+        save_interval=100000,
         log_interval=10000,
-        opponent= opponent
+        opponent= opponent,
+        randomize_player=True
     )
     
     trainer.train(num_episodes)
@@ -50,4 +51,4 @@ def train_qlearning(
 
 
 if __name__ == "__main__":
-    train_qlearning(rows=4, cols=4, epsilon_start = 0.7, num_episodes=400000)
+    train_qlearning(rows=3, cols=3, epsilon_start = 0.7, num_episodes=100000)

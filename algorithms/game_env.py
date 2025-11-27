@@ -251,9 +251,9 @@ class SkystonesEnv(gym.Env):
         acting_player = self.game.players[acting_player_idx]
         
         if winner == acting_player:
-            return 1.0
+            return 3.0
         else:
-            return -1.0
+            return -3.0
 
     def _terminal_reward(self, acting_player_idx: int) -> float:
         """
