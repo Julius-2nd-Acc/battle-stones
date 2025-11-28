@@ -434,7 +434,7 @@ class GameController:
         if control in ('reinforce', 'rf'):
             try:
                 from algorithms.reinforce_agent import ReinforceAgent
-                filename = "reinforce_agent.pth"
+                filename = f"reinforce_agent_{rows}x{cols}.pth"
                 model_path = os.path.join('models', filename)
                 if os.path.exists(model_path):
                     # Calculate input dimension
@@ -444,7 +444,7 @@ class GameController:
                         input_dim=input_dim,
                         gamma=0.99,
                         lr=1e-3,
-                        hidden_dim=256  # Match training config
+                        hidden_dim=2*256  # Match training config
                     )
                     agent.load(model_path)
                     self.logger.info(f"Loaded ReinforceAgent from {model_path}")

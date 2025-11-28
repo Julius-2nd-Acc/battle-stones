@@ -1,45 +1,49 @@
-
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 from algorithms.game_env import SkystonesEnv
-from algorithms.reinforce_agent import ReinforceAgent
+from algorithms.ppo_agent import PPOAgent
 from algorithms.mix_agent import MixAgent
 from algorithms.stats_recorder import StatsRecorder
 
-def train_reinforce(
-    num_episodes: int = 5000,
+def train_ppo(
+    num_episodes: int = 10000,
     gamma: float = 0.99,
-    lr: float = 1e-3,
+    lr: float = 3e-4,
     rows: int = 3,
     cols: int = 3,
-    model_path: str = "models/reinforce_agent.pth",
-    hidden_dim: int = 128
+    model_path: str = "models/ppo_agent.pth",
+    hidden_dim: int = 256,
+    batch_size: int = 64,
+    n_epochs: int = 10,
+    update_frequency: int = 20  # Update after N episodes
 ):
     env = SkystonesEnv(render_mode=None, capture_reward=1.0, rows=rows, cols=cols)
     
     # Calculate input dimension
-    # ownership (rows*cols) + board_stats (rows*cols*4) + hand_stats (2*max_slots*4)
     input_dim = (rows * cols) + (rows * cols * 4) + (2 * env.max_slots * 4)
     
-    agent = ReinforceAgent(
+    agent = PPOAgent(
         action_space=env.action_space,
         input_dim=input_dim,
         gamma=gamma,
         lr=lr,
-        hidden_dim=hidden_dim
+        hidden_dim=hidden_dim,
+        batch_size=batch_size,
+        n_epochs=n_epochs
     )
     
     # Opponent (MixAgent for robustness)
-    opponent = MixAgent(action_space=env.action_space, epsilon=0.4)
+    opponent = MixAgent(action_space=env.action_space, epsilon=0.2)
     
     # Initialize stats recorder
-    stats_recorder = StatsRecorder(save_dir="stats", model="reinforce_agent")
+    stats_recorder = StatsRecorder(save_dir="stats", model="ppo_agent")
     
     rewards_history = []
     loss_history = []
     
-    print(f"Starting REINFORCE training for {num_episodes} episodes...")
+    print(f"Starting PPO training for {num_episodes} episodes...")
+    print(f"Update frequency: every {update_frequency} episodes")
     
     for episode in range(1, num_episodes + 1):
         obs, info = env.reset()
@@ -47,7 +51,6 @@ def train_reinforce(
         total_reward = 0
         
         # Randomize player assignment (P0 or P1)
-        # 0 = Agent is P0, 1 = Agent is P1
         agent_player_idx = np.random.randint(0, 2)
         
         while not done:
@@ -64,32 +67,49 @@ def train_reinforce(
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             
+            # Store transition for PPO
             if current_player == agent_player_idx:
-                agent.store_reward(reward)
+                agent.memory.store_memory(
+                    agent.last_state,
+                    action,
+                    agent.last_log_prob,
+                    agent.last_value,
+                    reward,
+                    done
+                )
+                total_reward += reward
             else:
-                agent.store_reward(-reward) 
+                # Store negative reward for opponent's moves
+                # This helps the agent learn that opponent gains are bad
+                if agent.last_state is not None:
+                    agent.memory.store_memory(
+                        agent.last_state,
+                        action,
+                        agent.last_log_prob,
+                        agent.last_value,
+                        -reward,
+                        done
+                    )
                 
             obs = next_obs
             
-            if current_player == agent_player_idx:
-                total_reward += reward
-                
-        # Update agent
-        loss = agent.update()
-        loss_history.append(loss)
         rewards_history.append(total_reward)
         
         # Log episode stats
         stats_recorder.log_episode(
             episode=episode,
             reward=total_reward,
-            winner=None,  # We don't track winner explicitly in REINFORCE
-            epsilon=0.0,  # REINFORCE doesn't use epsilon
-            steps=0  # Could track steps if needed
+            winner=None,
+            epsilon=0.0,
+            steps=0
         )
         
-        if episode % 100 == 0:
-            avg_reward = np.mean(rewards_history[-100:])
+        # Update agent periodically
+        if episode % update_frequency == 0:
+            loss = agent.update()
+            loss_history.append(loss)
+            
+            avg_reward = np.mean(rewards_history[-100:]) if len(rewards_history) >= 100 else np.mean(rewards_history)
             print(f"Episode {episode}, Avg Reward: {avg_reward:.2f}, Loss: {loss:.4f}")
             
     # Save model
@@ -103,13 +123,13 @@ def train_reinforce(
     # Also save loss plot separately
     plt.figure(figsize=(10, 5))
     plt.plot(loss_history)
-    plt.title("Training Loss")
-    plt.xlabel("Episode")
+    plt.title("PPO Training Loss")
+    plt.xlabel("Update Step")
     plt.ylabel("Loss")
     plt.grid(True)
-    plt.savefig("stats/reinforce_loss.png")
+    plt.savefig("stats/ppo_loss.png")
     plt.close()
-    print("Loss plot saved to stats/reinforce_loss.png")
+    print("Loss plot saved to stats/ppo_loss.png")
 
 if __name__ == "__main__":
-    train_reinforce(num_episodes=50000, hidden_dim=2*256, rows=4, cols=4, model_path="models/reinforce_agent_4x4.pth") 
+    train_ppo(num_episodes=5000, update_frequency=10)

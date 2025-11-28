@@ -18,9 +18,9 @@ class GameInstance:
     def add_player(self, player: Player):
         self.players.append(player)
         
-    def setup_game(self, col=3, row=3, p1= PlayerType.HUMAN, p2= PlayerType.RANDOM, stone_amount=5):
+    def setup_game(self, col=3, row=3, p1= PlayerType.HUMAN, p2= PlayerType.RANDOM):
         self.started = True
-        self.stone_amount = stone_amount
+        self.stone_amount = (col * row) // 2 if (col * row) % 2 == 0 else (col * row + 1) // 2
         self.setup_board(col=col, rows=row)
         self.setup_players(p1=p1, p2=p2)
     
@@ -132,8 +132,12 @@ class GameInstance:
         return self.board.get_total_stone_count()
 
     def get_max_stones(self):
-            board_size = self.board.rows * self.board.cols
-        return self.board.rows * self.board.cols % 2 == 0
+        board_size = self.board.rows * self.board.cols
+        return (
+            board_size if board_size < self.stone_amount * 2 and board_size % 2 == 0
+            else board_size - 1 if board_size < self.stone_amount * 2
+            else self.stone_amount * 2
+        )
             
     def check_game_over(self):
         no_player_stones = all(len(player.stones) == 0 for player in self.players)
@@ -144,7 +148,7 @@ class GameInstance:
         )
         placed_stone_count = self.placed_stone_count()
 
-        if no_player_stones or no_empty_fields or placed_stone_count == 8:
+        if no_player_stones or no_empty_fields or placed_stone_count == self.get_max_stones():
             # Obtain stone counts for all players (dict player -> count)
             owner_counts = self.board.get_current_stone_count()
 
