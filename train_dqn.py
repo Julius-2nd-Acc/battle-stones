@@ -34,11 +34,11 @@ def train(
         agent=agent,
         env=env,
         model_path=model_path,
-        save_interval=5000,
+        save_interval=2000,
         log_interval=1000
     )
 
-    trainer.train(num_episodes=200000)
+    trainer.train(num_episodes=20000)
 
 if __name__ == '__main__':
     train(SmallQNet, hidden_dim=128)

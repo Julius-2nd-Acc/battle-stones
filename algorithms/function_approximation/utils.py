@@ -6,12 +6,12 @@ def normalize_vectorize_obs(env, obs):
     Convert env observation into a single vector epresenting a state
     Addition compared to other implementations: normalize everything to range [0,1] for NN
     '''
-    board_owner = obs['board_owner'].astype(np.float32).ravel() / 2.0
+    board_owner = obs['ownership'].astype(np.float32).ravel() / 2.0
 
-    board_type = obs['board_type'].astype(np.float32).ravel()
+    board_type = obs['board_stats'].astype(np.float32).ravel()
     board_type = (board_type + 1.0) / (env.num_types + 1.0)
 
-    hand = obs['hand_types'].astype(np.float32).ravel()
+    hand = obs['hand_stats'].astype(np.float32).ravel()
     hand = (hand + 1.0) / (env.num_types + 1.0)
 
     to_move = np.array([float(obs['to_move'])], dtype=np.float32)

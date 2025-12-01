@@ -73,6 +73,8 @@ class SkystonesEnv(gym.Env):
             }
         )
 
+        self.num_types = int(self.observation_space["board_stats"].high.max())
+
     # ------------------------------------------------------------------ #
     # Gymnasium API
     # ------------------------------------------------------------------ #
@@ -148,9 +150,9 @@ class SkystonesEnv(gym.Env):
         terminated = self._is_terminal()
         truncated = False
 
-        reward_from_p0 = capture_reward_from_p0
+        reward_from_p0 = capture_reward
         if terminated:
-            reward += self._final_outcome_reward(acting_player_idx=self.current_player_idx)
+            reward_from_p0 += self._final_outcome_reward(acting_player_idx=self.current_player_idx)
         else:
             # Switch side to move for next step
             self.current_player_idx = 1 - acting_player_idx
