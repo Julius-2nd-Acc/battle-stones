@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class FunctionApproximationAgent(Agent):
+class DQNAgent(Agent):
     def __init__(
         self,
         env,
@@ -23,7 +23,8 @@ class FunctionApproximationAgent(Agent):
         replay_capacity: int = 50_000,
         batch_size: int = 64,
         warmup_steps: int = 1_000,
-        updates_per_step: int = 1
+        updates_per_step: int = 1,
+        target_update_freq=1000
     ):
         self.env = env
         self.hidden_dim = hidden_dim
@@ -54,6 +55,18 @@ class FunctionApproximationAgent(Agent):
             **model_kwargs
         ).to(self.device)
 
+        self.target_model= model_cls(
+            obs_dim=obs_dim,
+            n_actions=n_actions,
+            hidden_dim=hidden_dim,
+            **model_kwargs
+        ).to(self.device)
+
+        self.target_model.load_state_dict(self.model.state_dict())
+        self.target_model.eval()
+
+        self.target_update_freq = target_update_freq
+
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.steps_done = 0
 
@@ -62,6 +75,9 @@ class FunctionApproximationAgent(Agent):
         self.warmup_steps = warmup_steps
         self.updates_per_step = updates_per_step
         self.training_steps = 0
+
+    def update_target_network(self):
+        self.target_model.load_state_dict(self.model.state_dict())
 
     def policy_action_masked(self, observation, legal_actions: list[int]) -> int:
         """
@@ -168,7 +184,7 @@ class FunctionApproximationAgent(Agent):
 
             # Q Learning update
             with torch.no_grad():
-                q_next_all = self.model(next_obs_t)                     
+                q_next_all = self.target_model(next_obs_t)                     
 
                 max_q_next_list = []
                 for i in range(self.batch_size):
@@ -183,7 +199,7 @@ class FunctionApproximationAgent(Agent):
 
                 target_t = rewards_t + self.gamma * (1.0 - dones_t) * max_q_next_t
 
-            loss = F.mse_loss(q_sa, target_t)
+            loss = F.smooth_l1_loss(q_sa, target_t)
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -192,6 +208,10 @@ class FunctionApproximationAgent(Agent):
             total_loss += loss.item()
 
         self.training_steps += 1
+
+        if self.training_steps % self.target_update_freq == 0:
+            self.update_target_network()
+
         return total_loss / self.updates_per_step
 
     def save(self, filepath):

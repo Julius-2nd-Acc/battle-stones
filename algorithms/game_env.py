@@ -102,25 +102,17 @@ class SkystonesEnv(gym.Env):
         return obs, info
 
     def step(self, action: int):
-        """
-        One environment step = one move by current_player_idx.
-
-        Reward components (from Player 0's perspective):
-          - capture/loss shaping each move
-          - final win/loss/draw reward when game ends
-
-        Invalid action → immediate loss for current player.
-        """
         assert self.game is not None, "Call reset() before step()."
 
-        player = self.game.players[self.current_player_idx]
+        acting_player_idx = self.current_player_idx
+        player = self.game.players[acting_player_idx]
 
         # Decode action
         slot, row, col = self._decode_action(action)
 
         # Map slot → actual stone object
         chosen_stone = self._get_stone_for_slot(
-            player_idx=self.current_player_idx, slot=slot
+            player_idx=acting_player_idx, slot=slot
         )
 
         # Check legality
@@ -130,8 +122,11 @@ class SkystonesEnv(gym.Env):
         )
 
         if not legal:
-            # Illegal move → current player loses
-            reward = self._terminal_reward(illegal_for_player=self.current_player_idx)
+            # Illegal move → acting player loses.
+            reward_from_p0 = self._terminal_reward(illegal_for_player=acting_player_idx)
+            # Convert P0-perspective reward to acting player's perspective
+            reward = reward_from_p0 if acting_player_idx == 0 else -reward_from_p0
+
             terminated = True
             truncated = False
             obs = self._build_observation()
@@ -151,33 +146,26 @@ class SkystonesEnv(gym.Env):
 
         delta_p0 = p0_after - p0_before
 
-        # Compute capture/loss reward from Player 0 perspective
-        # - If P0 moves: delta_p0 = 1 (new stone) + #captured_from_P1
-        #   so captures = delta_p0 - 1
-        # - If P1 moves: delta_p0 = - (#P0_stones_captured_by_P1)
-        #   which is already the punishment we want.
-        if self.current_player_idx == 0:
-            # Remove the baseline +1 for placing your own stone
+        # Capture/loss shaping from Player 0 perspective
+        if acting_player_idx == 0:
             net_captures_for_p0 = delta_p0 - 1
         else:
-            # Directly use delta_p0 (typically 0 or negative)
             net_captures_for_p0 = delta_p0
 
-        capture_reward = self.capture_reward * net_captures_for_p0
+        capture_reward_from_p0 = self.capture_reward * net_captures_for_p0
 
-        # -----------------------------------------------------------
-        # Check terminal and add final game result reward if needed
-        # -----------------------------------------------------------
         terminated = self._is_terminal()
         truncated = False
 
-        reward = capture_reward
-
+        reward_from_p0 = capture_reward_from_p0
         if terminated:
-            reward += self._final_outcome_reward()
+            reward_from_p0 += self._final_outcome_reward()
         else:
-            # Switch to other player
-            self.current_player_idx = 1 - self.current_player_idx
+            # Switch side to move for next step
+            self.current_player_idx = 1 - acting_player_idx
+
+        # Finally: convert from P0 perspective to acting player's perspective
+        reward = reward_from_p0 if acting_player_idx == 0 else -reward_from_p0
 
         obs = self._build_observation()
         info = {"capture_delta_p0": net_captures_for_p0}
@@ -186,6 +174,7 @@ class SkystonesEnv(gym.Env):
             self.render()
 
         return obs, reward, terminated, truncated, info
+
 
     def render(self):
         if self.render_mode == "human" and self.game is not None:
@@ -270,9 +259,9 @@ class SkystonesEnv(gym.Env):
 
         winner = winners[0]
         if winner == self.game.players[0]:
-            return 1.0
+            return 10.0
         elif winner == self.game.players[1]:
-            return -1.0
+            return -10.0
         else:
             return 0.0
 
@@ -282,8 +271,8 @@ class SkystonesEnv(gym.Env):
         From Player 0's perspective.
         """
         if illegal_for_player == 0:
-            return -1.0
+            return -10.0
         elif illegal_for_player == 1:
-            return 1.0
+            return 10.0
         else:
             return 0.0
