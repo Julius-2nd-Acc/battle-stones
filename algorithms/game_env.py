@@ -19,36 +19,23 @@ class SkystonesEnv(gym.Env):
 
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, capture_reward: float = 1.0):
+    def __init__(self, render_mode=None, capture_reward: float = 1.0, rows: int = 3, cols: int = 3):
         super().__init__()
         self.render_mode = render_mode
         self.capture_reward = capture_reward
+        self.rows = rows
+        self.cols = cols
 
         # Use a temporary game to infer board and stone info
         tmp_game = GameInstance()
-        tmp_game.setup_game(col=3, row=3)
-        self.rows = tmp_game.board.rows
-        self.cols = tmp_game.board.cols
+        tmp_game.setup_game(col=cols, row=rows)
+        # self.rows/cols already set above
         self.max_slots = max(len(slots) for slots in tmp_game.initial_slots.values())
 
         # Build a mapping from stone (n,s,e,w) -> type_id
-        # Note: This logic is now partially duplicated in StateBuilder, 
-        # but we need num_types for the observation space definition.
-        self.attr_to_type = {}
-        type_id = 0
-        for p_idx, slot_names in tmp_game.initial_slots.items():
-            player = tmp_game.players[p_idx]
-            for name in slot_names:
-                if name is None:
-                    continue
-                stone_obj = next((s for s in player.stones if s.name == name), None)
-                if stone_obj is None:
-                    continue
-                attrs = stone_obj.get_Attributes()  # (n,s,e,w)
-                if attrs not in self.attr_to_type:
-                    self.attr_to_type[attrs] = type_id
-                    type_id += 1
-        self.num_types = type_id
+        # Note: We now use direct stats in the observation, so this registry 
+        # is no longer needed for the observation space, but we keep the 
+        # max_slots calculation above.
 
         # Underlying game (created on reset)
         self.game = None
@@ -58,28 +45,28 @@ class SkystonesEnv(gym.Env):
         self.action_space = spaces.Discrete(self.max_slots * self.rows * self.cols)
 
         # Observation:
-        # - board_owner: 0 empty, 1 player0, 2 player1
-        # - board_type: -1 empty, otherwise 0..num_types-1
-        # - hand_types: -1 empty slot, otherwise 0..num_types-1
+        # - ownership: 0 empty, 1 player0, 2 player1
+        # - board_stats: (rows, cols, 4) -> (n, s, e, w) values
+        # - hand_stats: (2, max_slots, 4) -> (n, s, e, w) values
         # - to_move: which player (0 or 1)
         self.observation_space = spaces.Dict(
             {
-                "board_owner": spaces.Box(
+                "ownership": spaces.Box(
                     low=0,
                     high=2,
                     shape=(self.rows, self.cols),
                     dtype=np.int8,
                 ),
-                "board_type": spaces.Box(
-                    low=-1,
-                    high=self.num_types - 1,
-                    shape=(self.rows, self.cols),
+                "board_stats": spaces.Box(
+                    low=0,
+                    high=20, # Assuming stats don't exceed 20
+                    shape=(self.rows, self.cols, 4),
                     dtype=np.int8,
                 ),
-                "hand_types": spaces.Box(
-                    low=-1,
-                    high=self.num_types - 1,
-                    shape=(2, self.max_slots),
+                "hand_stats": spaces.Box(
+                    low=0,
+                    high=20,
+                    shape=(2, self.max_slots, 4),
                     dtype=np.int8,
                 ),
                 "to_move": spaces.Discrete(2),
@@ -105,7 +92,7 @@ class SkystonesEnv(gym.Env):
         """
         One environment step = one move by current_player_idx.
 
-        Reward components (from Player 0's perspective):
+        Reward components (from current player's perspective):
           - capture/loss shaping each move
           - final win/loss/draw reward when game ends
 
@@ -131,39 +118,31 @@ class SkystonesEnv(gym.Env):
 
         if not legal:
             # Illegal move → current player loses
-            reward = self._terminal_reward(illegal_for_player=self.current_player_idx)
+            reward = self._terminal_reward(acting_player_idx=self.current_player_idx)
             terminated = True
             truncated = False
             obs = self._build_observation()
             info = {"illegal_move": True}
             return obs, reward, terminated, truncated, info
 
-        # --------- measure P0 stones before the move ----------
+        # --------- measure current player's stones before the move ----------
         owner_counts_before = self.game.board.get_current_stone_count()
-        p0_before = owner_counts_before.get(self.game.players[0], 0)
+        current_player_before = owner_counts_before.get(player, 0)
 
         # Apply the move (this may cause captures)
         self.game.place_stone(player, (row, col), chosen_stone)
 
-        # --------- measure P0 stones after the move -----------
+        # --------- measure current player's stones after the move -----------
         owner_counts_after = self.game.board.get_current_stone_count()
-        p0_after = owner_counts_after.get(self.game.players[0], 0)
+        current_player_after = owner_counts_after.get(player, 0)
 
-        delta_p0 = p0_after - p0_before
+        # Calculate captures from current player's perspective
+        # delta = (stones after) - (stones before)
+        # This includes +1 for placing the stone, so captures = delta - 1
+        delta = current_player_after - current_player_before
+        net_captures = delta - 1  # Remove the +1 from placing our own stone
 
-        # Compute capture/loss reward from Player 0 perspective
-        # - If P0 moves: delta_p0 = 1 (new stone) + #captured_from_P1
-        #   so captures = delta_p0 - 1
-        # - If P1 moves: delta_p0 = - (#P0_stones_captured_by_P1)
-        #   which is already the punishment we want.
-        if self.current_player_idx == 0:
-            # Remove the baseline +1 for placing your own stone
-            net_captures_for_p0 = delta_p0 - 1
-        else:
-            # Directly use delta_p0 (typically 0 or negative)
-            net_captures_for_p0 = delta_p0
-
-        capture_reward = self.capture_reward * net_captures_for_p0
+        capture_reward = self.capture_reward * net_captures
 
         # -----------------------------------------------------------
         # Check terminal and add final game result reward if needed
@@ -174,13 +153,13 @@ class SkystonesEnv(gym.Env):
         reward = capture_reward
 
         if terminated:
-            reward += self._final_outcome_reward()
+            reward += self._final_outcome_reward(acting_player_idx=self.current_player_idx)
         else:
             # Switch to other player
             self.current_player_idx = 1 - self.current_player_idx
 
         obs = self._build_observation()
-        info = {"capture_delta_p0": net_captures_for_p0}
+        info = {"net_captures": net_captures}
 
         if self.render_mode == "human":
             self.render()
@@ -252,10 +231,10 @@ class SkystonesEnv(gym.Env):
         return no_player_stones or no_empty_fields 
     
 
-    def _final_outcome_reward(self) -> float:
+    def _final_outcome_reward(self, acting_player_idx: int) -> float:
         """
-        Final reward from Player 0's perspective:
-          +1 if P0 wins, -1 if P1 wins, 0 for draw.
+        Final reward from the acting player's perspective:
+          +1 if acting player wins, -1 if acting player loses, 0 for draw.
         """
         owner_counts = self.game.board.get_current_stone_count()
 
@@ -266,24 +245,19 @@ class SkystonesEnv(gym.Env):
         winners = [p for p, c in owner_counts.items() if c == max_count]
 
         if len(winners) != 1:
-            return 0.0
+            return -3.0
 
         winner = winners[0]
-        if winner == self.game.players[0]:
-            return 1.0
-        elif winner == self.game.players[1]:
-            return -1.0
+        acting_player = self.game.players[acting_player_idx]
+        
+        if winner == acting_player:
+            return 3.0
         else:
-            return 0.0
+            return -3.0
 
-    def _terminal_reward(self, illegal_for_player: int) -> float:
+    def _terminal_reward(self, acting_player_idx: int) -> float:
         """
-        Reward when someone plays an illegal move.
-        From Player 0's perspective.
+        Reward when the acting player plays an illegal move.
+        Always -1.0 because the acting player loses.
         """
-        if illegal_for_player == 0:
-            return -1.0
-        elif illegal_for_player == 1:
-            return 1.0
-        else:
-            return 0.0
+        return -1.0

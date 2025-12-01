@@ -24,44 +24,24 @@ class StateBuilder:
         cols = game_instance.board.cols
         max_slots = max((len(s) for s in game_instance.initial_slots.values()), default=0)
         
-        # --- board: owner + type_id ---
-        board_owner = np.zeros((rows, cols), dtype=np.int8)
-        board_type = np.full((rows, cols), fill_value=-1, dtype=np.int8)
+        # --- board: ownership + stats (n,s,e,w) ---
+        ownership = np.zeros((rows, cols), dtype=np.int8)
+        board_stats = np.zeros((rows, cols, 4), dtype=np.int8)
         
-        # Build type mapping (Stone Attributes -> Type ID)
-        # This should ideally be cached or constant, but we build it dynamically for now to match legacy behavior
-        attr_to_type = {}
-        type_id = 0
-        
-        # Scan all initial slots to build the type registry
-        for p_idx, slot_names in game_instance.initial_slots.items():
-            player = game_instance.players[p_idx]
-            for name in slot_names:
-                if name is None: continue
-                
-                # Find the stone object to get attributes
-                stone_obj = StateBuilder._find_stone_by_name(game_instance, player, name)
-                if stone_obj is None: continue
-                
-                attrs = StateBuilder._safe_get_attributes(stone_obj)
-                if attrs not in attr_to_type:
-                    attr_to_type[attrs] = type_id
-                    type_id += 1
-
         # Fill Board Grids
         for r in range(rows):
             for c in range(cols):
                 cell = game_instance.board.getField(r, c)
-                # Check if cell is not empty (Field.EMPTY is enum 0, but we check for object presence/attributes)
+                # Check if cell is not empty
                 if hasattr(cell, "player"): 
                     owner = 0 if cell.player == game_instance.players[0] else 1
-                    board_owner[r, c] = 1 if owner == 0 else 2 # 1 for P0, 2 for P1 (matching legacy env)
+                    ownership[r, c] = 1 if owner == 0 else 2 # 1 for P0, 2 for P1
                     
-                    attrs = StateBuilder._safe_get_attributes(cell)
-                    board_type[r, c] = attr_to_type.get(attrs, -1)
+                    attrs = StateBuilder._safe_get_attributes(cell) # (n, s, e, w)
+                    board_stats[r, c] = np.array(attrs, dtype=np.int8)
 
         # Fill Hand Grids
-        hand_types = np.full((2, max_slots), fill_value=-1, dtype=np.int8)
+        hand_stats = np.zeros((2, max_slots, 4), dtype=np.int8)
         for p_idx, player in enumerate(game_instance.players):
             slot_names = game_instance.initial_slots.get(p_idx, [])
             names_in_hand = {s.name: s for s in player.stones}
@@ -74,14 +54,14 @@ class StateBuilder:
                 if stone_obj is None: continue # Stone played
                 
                 attrs = StateBuilder._safe_get_attributes(stone_obj)
-                hand_types[p_idx, slot_idx] = attr_to_type.get(attrs, -1)
+                hand_stats[p_idx, slot_idx] = np.array(attrs, dtype=np.int8)
 
         to_move = np.array(player_idx, dtype=np.int8)
 
         return {
-            "board_owner": board_owner,
-            "board_type": board_type,
-            "hand_types": hand_types,
+            "ownership": ownership,
+            "board_stats": board_stats,
+            "hand_stats": hand_stats,
             "to_move": to_move,
         }
 
@@ -103,8 +83,10 @@ class StateBuilder:
         players_stones = []
         for p in game_instance.players:
             players_stones.append([s.name for s in p.stones])
+        
 
         payload = {"board": board_repr, "players": players_stones, "to_move": player_idx}
+        print(payload)
         return json.dumps(payload, sort_keys=True)
 
     @staticmethod
