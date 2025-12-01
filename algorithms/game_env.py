@@ -100,14 +100,15 @@ class SkystonesEnv(gym.Env):
         """
         assert self.game is not None, "Call reset() before step()."
 
-        player = self.game.players[self.current_player_idx]
+        acting_player_idx = self.current_player_idx
+        player = self.game.players[acting_player_idx]
 
         # Decode action
         slot, row, col = self._decode_action(action)
 
         # Map slot → actual stone object
         chosen_stone = self._get_stone_for_slot(
-            player_idx=self.current_player_idx, slot=slot
+            player_idx=acting_player_idx, slot=slot
         )
 
         # Check legality
@@ -144,19 +145,18 @@ class SkystonesEnv(gym.Env):
 
         capture_reward = self.capture_reward * net_captures
 
-        # -----------------------------------------------------------
-        # Check terminal and add final game result reward if needed
-        # -----------------------------------------------------------
         terminated = self._is_terminal()
         truncated = False
 
-        reward = capture_reward
-
+        reward_from_p0 = capture_reward_from_p0
         if terminated:
             reward += self._final_outcome_reward(acting_player_idx=self.current_player_idx)
         else:
-            # Switch to other player
-            self.current_player_idx = 1 - self.current_player_idx
+            # Switch side to move for next step
+            self.current_player_idx = 1 - acting_player_idx
+
+        # Finally: convert from P0 perspective to acting player's perspective
+        reward = reward_from_p0 if acting_player_idx == 0 else -reward_from_p0
 
         obs = self._build_observation()
         info = {"net_captures": net_captures}
@@ -165,6 +165,7 @@ class SkystonesEnv(gym.Env):
             self.render()
 
         return obs, reward, terminated, truncated, info
+
 
     def render(self):
         if self.render_mode == "human" and self.game is not None:

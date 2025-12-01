@@ -71,36 +71,31 @@ class Trainer:
                     # Opponent controls this player
                     action = self.opponent.choose_action(obs, legal_actions)
 
+                # DEBUG: make sure we never step with an illegal action according to our own mask
+                if self.env.current_player_idx == 0:  # only for the agent player
+                    assert action in legal_actions, f"Chosen action {action} not in legal_actions {legal_actions[:20]}"
+
                 next_obs, reward, terminated, truncated, info = self.env.step(action)
                 done = terminated or truncated
+                '''
+                if done:
+                    print(
+                        f"Episode {episode_idx} done. "
+                        f"terminated={terminated}, truncated={truncated}, "
+                        f"illegal_move={info.get('illegal_move', False)}, reward={reward}"
+                    )
+                '''
                 
                 # Track data for MC only for agent's moves
                 if is_agent_turn and hasattr(self.agent, 'get_state_key'):
                      state_key = self.agent.get_state_key(obs)
                      episode_data.append((state_key, action, reward))
 
-                # Q-Learning Update (Online) -- update when agent acted
-                if is_agent_turn and hasattr(self.agent, 'update'):
-                    # Next state is opponent's turn (unless game over)
-                    # We need legal actions for the OPPONENT in the next state to calculate max Q(s')
-                    # Note: next_obs is already relative to the opponent (who is "current player" in next_obs)
-                    
-                    legal_next = None
-                    if not done:
-                        # The player to move in next_obs is the opponent
-                        # self.env.current_player_idx has already been updated to opponent
-                        opponent_idx = self.env.current_player_idx
-                        legal_next = self.env.get_legal_actions(opponent_idx)
-                    
-                    # Standard Q-learning update (as requested, no Minimax)
-                    self.agent.update(
-                        obs, 
-                        action, 
-                        reward, 
-                        next_obs, 
-                        done, 
-                        legal_next_actions=legal_next
-                    )
+                # Q-Learning Update (Online)
+                if player_to_act == 0 and hasattr(self.agent, 'update'):
+                    # we care about what P0 could do next, not P1
+                    legal_next = self.env.get_legal_actions(player_idx=0) if not done else []
+                    self.agent.update(obs, action, reward, next_obs, done, legal_next_actions=legal_next)
 
                 total_reward += reward
                 obs = next_obs
