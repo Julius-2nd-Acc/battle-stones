@@ -1,21 +1,23 @@
 import random
 import pickle
+import gzip
 from collections import defaultdict
-from typing import Any, List
+from typing import Any, List, Tuple
 
 import numpy as np
 from algorithms.agent_interface import Agent
+from services.compact_state import CompactStateBuilder
 
 def obs_to_state(obs) -> tuple:
     """
     Convert SkystonesEnv observation dict into a hashable state key (tuple).
-    Matches the *current* observation structure in SkystonesEnv.
+    Matches the current observation structure in SkystonesEnv.
     """
-    board_owner_flat = tuple(obs["board_owner"].astype(int).ravel())
-    board_type_flat = tuple(obs["board_type"].astype(int).ravel())
-    hand_flat = tuple(obs["hand_types"].astype(int).ravel())
+    ownership_flat = tuple(obs["ownership"].astype(int).ravel())
+    board_stats_flat = tuple(obs["board_stats"].astype(int).ravel())
+    hand_stats_flat = tuple(obs["hand_stats"].astype(int).ravel())
     to_move = int(obs["to_move"])
-    return board_owner_flat + board_type_flat + hand_flat + (to_move,)
+    return ownership_flat + board_stats_flat + hand_stats_flat + (to_move,)
 
 class MCAgent(Agent):
     """
@@ -23,10 +25,17 @@ class MCAgent(Agent):
     Q: state -> action values (tabular)
     """
 
-    def __init__(self, action_space, gamma: float = 0.99, epsilon: float = 0.1):
+    def __init__(
+        self, 
+        action_space, 
+        gamma: float = 0.99, 
+        epsilon: float = 0.1,
+        use_compact_state: bool = True
+    ):
         self.action_space = action_space
         self.gamma = gamma
         self.epsilon = epsilon
+        self.use_compact_state = use_compact_state
 
         # Q(s)[a] = value
         self.Q = defaultdict(self._zeros_for_state)
@@ -36,7 +45,7 @@ class MCAgent(Agent):
         self.returns_count = defaultdict(int)   # (s,a) -> count of returns
 
     def _zeros_for_state(self):
-        return np.zeros(self.action_space.n, dtype=np.float32)
+        return np.zeros(self.action_space.n, dtype=np.float16)
     
     def choose_action(self, observation: Any, legal_actions: List[int] | None = None) -> int:
         """
@@ -50,6 +59,8 @@ class MCAgent(Agent):
     # --------- policy / state helpers --------- #
 
     def get_state_key(self, obs):
+        if self.use_compact_state:
+            return CompactStateBuilder.build_compact_state_key(obs)
         return obs_to_state(obs)
     
     def policy_action_masked(self, obs, legal_actions):
@@ -133,35 +144,40 @@ class MCAgent(Agent):
 
     def save(self, filepath: str):
         """
-        Save the agent to disk.
+        Save the agent to disk using gzip compression.
         """
         data = {
             "gamma": self.gamma,
             "epsilon": self.epsilon,
+            "use_compact_state": self.use_compact_state,
             "Q": {state: q.tolist() for state, q in self.Q.items()},
             "returns_sum": dict(self.returns_sum),
             "returns_count": dict(self.returns_count),
         }
-        with open(filepath, "wb") as f:
+        with gzip.open(filepath, "wb") as f:
             pickle.dump(data, f)
 
     @classmethod
     def load(cls, filepath: str, action_space):
         """
-        Load an agent from disk. You must pass the env's action_space.
+        Load an agent from disk using gzip decompression.
         """
-        with open(filepath, "rb") as f:
+        with gzip.open(filepath, "rb") as f:
             data = pickle.load(f)
+
+        # Handle legacy models
+        use_compact = data.get("use_compact_state", False)
 
         agent = cls(
             action_space=action_space,
             gamma=data["gamma"],
             epsilon=data["epsilon"],
+            use_compact_state=use_compact
         )
 
         agent.Q = defaultdict(
             agent._zeros_for_state,
-            {state: np.array(q, dtype=np.float32) for state, q in data["Q"].items()},
+            {state: np.array(q, dtype=np.float16) for state, q in data["Q"].items()},
         )
         agent.returns_sum = defaultdict(float, data["returns_sum"])
         agent.returns_count = defaultdict(int, data["returns_count"])
