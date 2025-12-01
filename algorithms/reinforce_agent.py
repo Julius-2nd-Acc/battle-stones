@@ -66,27 +66,8 @@ class ReinforceAgent(Agent):
         """
         Convert observation dict to a flat tensor.
         """
-        # Using the same logic as obs_to_state but flattening for NN
-        # ownership: (rows, cols) -> flatten
-        # board_stats: (rows, cols, 4) -> flatten
-        # hand_stats: (2, max_slots, 4) -> flatten
-        # to_move: scalar (ignored for relative state, but we can include it if needed)
-        
-        # Note: We should ideally use the relative state logic from CompactStateBuilder
-        # but for NN we usually want raw features. 
-        # However, to maintain consistency with the "Relative State" fix, 
-        # we should probably normalize ownership based on to_move.
-        
-        # Let's use the raw observation but maybe normalize values
-        
         ownership = obs["ownership"].flatten()
-        
-        # Normalize ownership relative to current player?
-        # If to_move=1, swap 1s and 2s in ownership?
-        # The environment now returns rewards relative to current player.
-        # But the observation "ownership" is absolute (1=P0, 2=P1).
-        # We should normalize this for the NN so it always sees "1=Me, 2=Opponent".
-        
+
         to_move = obs["to_move"]
         if to_move == 1:
             # Swap 1 and 2

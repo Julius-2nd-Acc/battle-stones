@@ -245,7 +245,7 @@ class SkystonesEnv(gym.Env):
         winners = [p for p, c in owner_counts.items() if c == max_count]
 
         if len(winners) != 1:
-            return 0.0
+            return -3.0
 
         winner = winners[0]
         acting_player = self.game.players[acting_player_idx]

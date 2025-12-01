@@ -16,7 +16,7 @@ def train_reinforce(
     model_path: str = "models/reinforce_agent.pth",
     hidden_dim: int = 128
 ):
-    env = SkystonesEnv(render_mode=None, capture_reward=1.0, rows=rows, cols=cols)
+    env = SkystonesEnv(render_mode=None, capture_reward=0.5, rows=rows, cols=cols)
     
     # Calculate input dimension
     # ownership (rows*cols) + board_stats (rows*cols*4) + hand_stats (2*max_slots*4)
@@ -30,8 +30,24 @@ def train_reinforce(
         hidden_dim=hidden_dim
     )
     
-    # Opponent (MixAgent for robustness)
-    opponent = MixAgent(action_space=env.action_space, epsilon=0.4)
+    # Load existing model if available
+    if os.path.exists(model_path):
+        print(f"Loading existing model from {model_path}...")
+        try:
+            agent.load(model_path)
+            print("Model loaded successfully!")
+        except Exception as e:
+            print(f"Failed to load model: {e}")
+            print("Starting training from scratch.")
+    
+    opponent = ReinforceAgent(
+        action_space=env.action_space,
+        input_dim=input_dim,
+        gamma=gamma,
+        lr=lr,
+        hidden_dim=hidden_dim
+    )
+    opponent.load(model_path)
     
     # Initialize stats recorder
     stats_recorder = StatsRecorder(save_dir="stats", model="reinforce_agent")
@@ -112,4 +128,4 @@ def train_reinforce(
     print("Loss plot saved to stats/reinforce_loss.png")
 
 if __name__ == "__main__":
-    train_reinforce(num_episodes=50000, hidden_dim=2*256, rows=4, cols=4, model_path="models/reinforce_agent_4x4.pth") 
+    train_reinforce(num_episodes=10000, hidden_dim=2*256, rows=4, cols=4, model_path="models/reinforce_agent_4x4.pth") 
