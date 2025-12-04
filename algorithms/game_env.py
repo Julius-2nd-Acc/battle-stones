@@ -150,15 +150,18 @@ class SkystonesEnv(gym.Env):
         terminated = self._is_terminal()
         truncated = False
 
-        reward_from_p0 = capture_reward
+        capture_reward = self.capture_reward * net_captures
+
+        terminated = self._is_terminal()
+        truncated = False
+
+        # Reward is from the acting player's perspective
+        reward = capture_reward
         if terminated:
-            reward_from_p0 += self._final_outcome_reward(acting_player_idx=self.current_player_idx)
+            reward += self._final_outcome_reward(acting_player_idx=acting_player_idx)
         else:
             # Switch side to move for next step
             self.current_player_idx = 1 - acting_player_idx
-
-        # Finally: convert from P0 perspective to acting player's perspective
-        reward = reward_from_p0 if acting_player_idx == 0 else -reward_from_p0
 
         obs = self._build_observation()
         info = {"net_captures": net_captures}
@@ -248,7 +251,7 @@ class SkystonesEnv(gym.Env):
         winners = [p for p, c in owner_counts.items() if c == max_count]
 
         if len(winners) != 1:
-            return -3.0
+            return 0.0
 
         winner = winners[0]
         acting_player = self.game.players[acting_player_idx]

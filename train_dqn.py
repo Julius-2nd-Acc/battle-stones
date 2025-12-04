@@ -8,11 +8,11 @@ import os
 def train(
     model_cls,
     hidden_dim=128,
-    gamma=0.99,
+    gamma=0.8,
     lr=1e-3,
     epsilon=0.99,
     epsilon_min=0.05,
-    epsilon_decay=0.999,
+    epsilon_decay=0.9,
     model_path='models/dqn.pkl',
     target_update_freq=1000,
     model_kwargs=None   

@@ -4,6 +4,6 @@
 /q_table_qlearn_vs_mc.pkl
 /q_table_smoke.pkl
 *.ipynb
-__pycache__
+*pycache*
 models
 stats
