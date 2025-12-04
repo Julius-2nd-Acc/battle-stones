@@ -66,7 +66,7 @@ if __name__ == "__main__":
             rows=3, 
             cols=3, 
             epsilon_start=0.7, 
-            num_episodes=100000,
+            num_episodes=10000,
             model_path=champion_path      # Save as the first champion
         )
     

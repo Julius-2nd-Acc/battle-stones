@@ -12,31 +12,13 @@ from services.compact_state import CompactStateBuilder
 def obs_to_state(obs) -> tuple:
     """
     Convert SkystonesEnv observation dict into a hashable state key (tuple).
-    Matches the current observation structure in SkystonesEnv.
+    This version matches the MC agent encoding.
     """
-    ownership = obs["ownership"]
-    board_stats = obs["board_stats"]
-    hand_stats = obs["hand_stats"]
+    ownership_flat = tuple(obs["ownership"].astype(int).ravel())
+    board_stats_flat = tuple(obs["board_stats"].astype(int).ravel())
+    hand_stats_flat = tuple(obs["hand_stats"].astype(int).ravel())
     to_move = int(obs["to_move"])
-
-    # Normalize ownership
-    me_id = to_move + 1
-    # Create a copy or new array for normalized ownership
-    # 0 -> 0
-    # me_id -> 1
-    # other -> 2
-    norm_ownership = np.zeros_like(ownership)
-    norm_ownership[ownership == me_id] = 1
-    norm_ownership[(ownership != 0) & (ownership != me_id)] = 2
-    
-    ownership_flat = tuple(norm_ownership.astype(int).ravel())
-    board_stats_flat = tuple(board_stats.astype(int).ravel())
-    
-    # Normalize hands
-    my_hand = tuple(hand_stats[to_move].astype(int).ravel())
-    opp_hand = tuple(hand_stats[1 - to_move].astype(int).ravel())
-    
-    return ownership_flat + board_stats_flat + my_hand + opp_hand
+    return ownership_flat + board_stats_flat + hand_stats_flat + (to_move,)
 
 
 class QLearningAgent(Agent):

@@ -12,6 +12,9 @@ from services.state_builder import StateBuilder
 from obj.player import PlayerType
 from algorithms.agent_interface import Agent
 
+from algorithms.random_agent import RandomAgent
+from algorithms.mix_agent import MixAgent
+
 def _convert_numpy_types(obj):
     """Recursively convert numpy types to native Python types for JSON serialization."""
     if isinstance(obj, np.integer):
@@ -457,7 +460,7 @@ class GameController:
 
         if control == 'medium':
             from algorithms.medium_agent import MediumAgent
-            return MediumAgent(action_space), None
+            return MixAgent(action_space), None
 
         if control == 'mcts':
             from algorithms.mcts_agent import MCTSAgent

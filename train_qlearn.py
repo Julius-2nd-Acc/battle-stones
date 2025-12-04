@@ -1,8 +1,8 @@
 import os
 from algorithms.game_env import SkystonesEnv
-from algorithms.mix_agent import MixAgent
 from algorithms.q_learning import QLearningAgent
 from algorithms.trainer import Trainer
+from algorithms.mix_agent import MixAgent
 
 def train_qlearning(
     num_episodes: int = 10000,
@@ -28,10 +28,11 @@ def train_qlearning(
             alpha=alpha,
             gamma=gamma,
             epsilon=epsilon_start,
+            use_compact_state=True
         )
     
     # Inject decay params into agent for Trainer to use
-    agent.epsilon_min = 0.4
+    agent.epsilon_min = 0.01
     agent.epsilon_decay = 0.999
     opponent = MixAgent(action_space=env.action_space, epsilon=0.4)
 
@@ -51,4 +52,4 @@ def train_qlearning(
 
 
 if __name__ == "__main__":
-    train_qlearning(rows=3, cols=3, epsilon_start = 0.7, num_episodes=100000)
+    train_qlearning(rows=3, cols=3, epsilon_start = 0.7, num_episodes=20000)

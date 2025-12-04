@@ -9,12 +9,12 @@ class LightGameState:
     """
     A lightweight, numpy-based representation of the game state for fast cloning and simulation.
     """
-    def __init__(self, ownership, board_stats, hand_stats, to_move, stones_left):
+    def __init__(self, ownership, board_stats, hand_stats, to_move, valid_slots):
         self.ownership = ownership.copy() # (rows, cols) 0=empty, 1=P0, 2=P1
         self.board_stats = board_stats.copy() # (rows, cols, 4)
         self.hand_stats = hand_stats.copy() # (2, max_slots, 4)
         self.to_move = to_move # 0 or 1
-        self.stones_left = list(stones_left) # [p0_count, p1_count]
+        self.valid_slots = [list(valid_slots[0]), list(valid_slots[1])] # List of valid indices for each player
         
         self.rows, self.cols = self.ownership.shape
         self.max_slots = self.hand_stats.shape[1]
@@ -27,94 +27,19 @@ class LightGameState:
         hand_stats = obs["hand_stats"]
         to_move = int(obs["to_move"])
         
-        # Infer stones left from hand_stats
-        # We assume a stone is "present" if its stats are not all 0 (or some other marker)
-        # But wait, the observation doesn't explicitly mask used stones in hand_stats usually.
-        # However, SkystonesEnv doesn't clear hand_stats for used stones in the observation?
-        # Let's check SkystonesEnv. It uses StateBuilder.
-        # StateBuilder.build_gym_observation:
-        # "hand_stats": ... for s in player.stones ...
-        # So hand_stats ONLY contains stones currently in hand.
-        # But the array is fixed size (max_slots).
-        # We need to know WHICH slots are valid.
-        # The observation doesn't explicitly give us a "valid slots" mask, 
-        # but we can infer it: if we try to place a stone that doesn't exist, it's illegal.
-        # Actually, StateBuilder pads with 0s. A stone with 0,0,0,0 is likely invalid or weak.
-        # But a real stone could be 0,0,0,0? Unlikely in this game design but possible.
-        # BETTER APPROACH: The observation doesn't fully capture "which slot is valid" if 0s are valid stats.
-        # However, for MCTS simulation, we can track it if we start from a valid state.
-        # But from_obs is hard.
-        # Workaround: We will assume the agent only calls from_obs at the root.
-        # We can use `legal_actions` passed to choose_action to determine valid slots?
-        # No, `from_obs` is static.
-        
-        # Let's assume for now that we can trust the hand_stats slots that correspond to legal actions.
-        # But we need to track stones_left for the simulation.
-        # We'll count non-zero entries? No, risky.
-        # Let's just track "stones_left" as a count, and for the simulation, 
-        # we need to know which slots are available.
-        # We will add a `valid_slots` mask to LightGameState.
-        
-        # For the root state, we might need to rely on the fact that we only expand legal actions.
-        # But for deep simulation, we need to know what's left.
-        # Let's initialize `valid_slots` assuming all slots in hand_stats are valid 
-        # UNLESS we can check against legal actions.
-        
-        # Actually, `hand_stats` in `StateBuilder` is built from `player.stones`.
-        # It does NOT preserve original slot indices. It just lists current stones.
-        # So slot 0 is always the first stone in hand, etc.
-        # This means `action = slot * ...` refers to the index in the CURRENT hand list?
-        # Let's verify `StateBuilder.get_legal_actions`.
-        # It iterates `enumerate(player.stones)`.
-        # So yes, slot 0 is the first available stone.
-        # This simplifies things! We don't need to track original slots.
-        # We just need to know how many stones are left.
-        
-        p0_stones = np.count_nonzero(np.sum(hand_stats[0], axis=1) >= 0) # This is always true for padded 0s?
-        # Wait, StateBuilder pads with 0s?
-        # "if len(names) < max_slots: names += [None] ..." in GameInstance.
-        # But StateBuilder iterates `player.stones`.
-        # `hand_stats` size is `(2, max_slots, 4)`.
-        # It fills `len(player.stones)` and leaves the rest as 0?
-        # We need to distinguish "Real Stone 0,0,0,0" from "Empty Slot".
-        # Given the game design, stones usually have stats > 0.
-        # Let's assume we can just use the count of stones provided in the list.
-        # Actually, `hand_stats` might contain garbage or 0s for empty slots.
-        
-        # Let's count how many valid stones are in the hand_stats based on the game logic.
-        # In `StateBuilder`, it fills the array with current stones.
-        # So if I have 3 stones, indices 0, 1, 2 are valid. 3, 4 are 0s.
-        # We can just track `stones_left` count for each player.
-        # But we can't easily know `stones_left` just from `hand_stats` if 0s are ambiguous.
-        # However, `ownership` tells us how many stones are on the board.
-        # Total stones per player is fixed (4 or 5).
-        # stones_left = Total - stones_on_board.
-        # Let's assume 4 stones per player for now (standard).
-        
-        p0_on_board = np.count_nonzero(ownership == 1)
-        p1_on_board = np.count_nonzero(ownership == 2)
-        
-        # This is a bit fragile if total stones change.
-        # But for MCTS, we can just assume the `hand_stats` entries are valid up to some count.
-        # Let's try to infer from the non-zero rows, or just pass it in if possible.
-        # For now, let's assume valid stones are packed at the start of the array.
-        
-        # We'll count rows that are not all zeros? 
-        # Or better: we can deduce it from the number of empty cells? No.
-        
-        # Let's use a heuristic: count non-zero rows.
-        # If a stone is truly 0,0,0,0, this breaks. But that stone is useless anyway.
-        p0_count = 0
+        # Identify valid slots (non-zero stats)
+        # Note: This assumes no valid stone has exactly (0,0,0,0) stats.
+        p0_slots = []
         for i in range(hand_stats.shape[1]):
             if np.any(hand_stats[0][i] != 0):
-                p0_count += 1
+                p0_slots.append(i)
                 
-        p1_count = 0
+        p1_slots = []
         for i in range(hand_stats.shape[1]):
             if np.any(hand_stats[1][i] != 0):
-                p1_count += 1
+                p1_slots.append(i)
                 
-        return cls(ownership, board_stats, hand_stats, to_move, [p0_count, p1_count])
+        return cls(ownership, board_stats, hand_stats, to_move, [p0_slots, p1_slots])
 
     def get_legal_actions(self):
         """
@@ -133,15 +58,14 @@ class LightGameState:
         if not empty_indices:
             return []
             
-        # 2. Find valid stone slots
-        # We assume stones are packed at the start of the array up to stones_left[player]
-        num_stones = self.stones_left[self.to_move]
-        if num_stones == 0:
+        # 2. Get valid slots for current player
+        current_slots = self.valid_slots[self.to_move]
+        if not current_slots:
             return []
             
         # 3. Combine
         cells_per_board = self.rows * self.cols
-        for slot in range(num_stones):
+        for slot in current_slots:
             for cell_idx in empty_indices:
                 actions.append(slot * cells_per_board + cell_idx)
                 
@@ -155,7 +79,9 @@ class LightGameState:
         new_ownership = self.ownership.copy()
         new_board_stats = self.board_stats.copy()
         new_hand_stats = self.hand_stats.copy()
-        new_stones_left = list(self.stones_left)
+        
+        # Deep copy valid slots
+        new_valid_slots = [list(self.valid_slots[0]), list(self.valid_slots[1])]
         
         cells_per_board = self.rows * self.cols
         slot = action // cells_per_board
@@ -175,16 +101,10 @@ class LightGameState:
         new_board_stats[r, c] = stats
         
         # 2. Remove Stone from Hand
-        # Since we assume packed array, we remove this stone by shifting others down?
-        # Or just swap with the last one and decrement count?
-        # Swapping is faster and keeps packing.
-        last_idx = new_stones_left[player_idx] - 1
-        if slot != last_idx:
-            new_hand_stats[player_idx][slot] = new_hand_stats[player_idx][last_idx]
-        
-        # Clear the last one (optional, but good for debugging)
-        new_hand_stats[player_idx][last_idx] = 0
-        new_stones_left[player_idx] -= 1
+        # Just zero it out and remove from valid_slots
+        new_hand_stats[player_idx][slot] = 0
+        if slot in new_valid_slots[player_idx]:
+            new_valid_slots[player_idx].remove(slot)
         
         # 3. Resolve Captures
         # Neighbors: N, S, E, W
@@ -207,7 +127,7 @@ class LightGameState:
         # 4. Switch Turn
         new_to_move = 1 - self.to_move
         
-        return LightGameState(new_ownership, new_board_stats, new_hand_stats, new_to_move, new_stones_left)
+        return LightGameState(new_ownership, new_board_stats, new_hand_stats, new_to_move, new_valid_slots)
 
     def _resolve_capture(self, r1, c1, r2, c2, stat_idx1, stat_idx2, my_id, enemy_id, ownership, board_stats):
         if ownership[r2, c2] == enemy_id:
@@ -218,26 +138,30 @@ class LightGameState:
 
     def is_terminal(self):
         # Game over if no stones left for either player OR no empty spots
-        if self.stones_left[0] == 0 and self.stones_left[1] == 0:
+        p0_empty = len(self.valid_slots[0]) == 0
+        p1_empty = len(self.valid_slots[1]) == 0
+        
+        if p0_empty and p1_empty:
             return True
+            
         if np.all(self.ownership != 0):
             return True
-        # Also if current player has no stones?
-        if self.stones_left[self.to_move] == 0:
-            # If current player has no stones, but board has space and other player has stones,
-            # usually the turn passes? 
-            # But in this simplified model, let's assume game ends or we handle pass.
-            # SkystonesEnv checks: "no_player_stones = all(len==0)"
-            # If one player runs out, they skip turn?
-            # GameInstance: "if len(current_player.stones) == 0: ... continue"
-            # So we should probably check if BOTH run out.
-            # But for MCTS, let's simplify: if I can't move, is it terminal?
-            # If I have no stones, I can't move.
-            # If opponent has stones, they keep playing.
-            # We need to handle "Pass".
-            # But `get_legal_actions` returns empty if no stones.
-            # If we return empty actions, MCTS loop breaks.
-            pass
+            
+        # If current player has no stones, they must pass?
+        # In this simplified model, if I have no stones, I can't move.
+        # If opponent has stones, they should move.
+        # But step() switches turn unconditionally.
+        # If I have no stones, get_legal_actions returns [].
+        # MCTS loop handles this?
+        # If get_legal_actions is empty but game not terminal (opponent has stones),
+        # we should probably return a "Pass" action or handle it.
+        # But our action space doesn't have "Pass".
+        # For now, let's assume if I have no stones, it's terminal FOR ME?
+        # No, MCTS needs to simulate the opponent playing out.
+        # But if I can't move, I can't generate a child node.
+        # So the tree stops here.
+        # If the tree stops, we evaluate the state.
+        # This is acceptable for MCTS: if I can't move, the game ends for this branch.
         return False
         
     def get_result(self, player_idx):
