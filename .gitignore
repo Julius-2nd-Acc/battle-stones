@@ -6,4 +6,4 @@
 *.ipynb
 *pycache*
 models
-stats
+stats/*

@@ -61,4 +61,4 @@ def train(
     trainer.train(num_episodes=20000)
 
 if __name__ == '__main__':
-    train(SmallQNet, hidden_dim=128, model_path='models/dqn_3x3.pkl')
+    train(SmallQNet, hidden_dim=256, model_path='models/dqn_3x3.pkl')

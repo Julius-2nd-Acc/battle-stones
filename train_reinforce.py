@@ -40,6 +40,7 @@ def train_reinforce(
             print(f"Failed to load model: {e}")
             print("Starting training from scratch.")
     
+    '''
     opponent = ReinforceAgent(
         action_space=env.action_space,
         input_dim=input_dim,
@@ -48,7 +49,9 @@ def train_reinforce(
         hidden_dim=hidden_dim
     )
     opponent.load(model_path)
-    
+    '''
+
+    opponent = MixAgent(env.action_space, epsilon=0.6)
     # Initialize stats recorder
     stats_recorder = StatsRecorder(save_dir="stats", model="reinforce_agent")
     
@@ -81,15 +84,27 @@ def train_reinforce(
             done = terminated or truncated
             
             if current_player == agent_player_idx:
-                agent.store_reward(reward)
-            else:
-                agent.store_reward(-reward) 
+                agent.store_reward(reward) 
                 
             obs = next_obs
             
             if current_player == agent_player_idx:
                 total_reward += reward
-                
+
+        # After the while loop, before agent.update()
+        last_actor = env.current_player_idx  # player who just moved
+
+        # 'reward' here is from the last step in the loop
+        if last_actor != agent_player_idx:
+            # Opponent made the final move and got 'reward' from their perspective.
+            # From the agent's perspective it's -reward.
+            if agent.rewards:
+                agent.rewards[-1] += -reward  # add terminal outcome to last agent reward
+            else:
+                # Edge case: agent never moved (very short game)
+                agent.store_reward(-reward)
+
+
         # Update agent
         loss = agent.update()
         loss_history.append(loss)
@@ -128,4 +143,4 @@ def train_reinforce(
     print("Loss plot saved to stats/reinforce_loss.png")
 
 if __name__ == "__main__":
-    train_reinforce(num_episodes=10000, hidden_dim=2*256, rows=4, cols=4, model_path="models/reinforce_agent_4x4.pth") 
+    train_reinforce(num_episodes=10000, hidden_dim=2*512, rows=3, cols=3, model_path="models/reinforce_agent_3x3.pth") 

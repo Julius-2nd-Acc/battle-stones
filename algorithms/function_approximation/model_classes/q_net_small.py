@@ -10,7 +10,7 @@ class SmallQNet(nn.Module):
         self.out = nn.Linear(hidden_dim, n_actions)
 
     def forward(self, x: torch.Tensor):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.tanh(self.fc1(x))
+        x = F.tanh(self.fc2(x))
         q = self.out(x)
         return q

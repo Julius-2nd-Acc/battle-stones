@@ -72,7 +72,7 @@ class Trainer:
                     action = self.opponent.choose_action(obs, legal_actions)
 
                 # DEBUG: make sure we never step with an illegal action according to our own mask
-                if self.env.current_player_idx == 0:  # only for the agent player
+                if is_agent_turn:
                     assert action in legal_actions, f"Chosen action {action} not in legal_actions {legal_actions[:20]}"
 
                 next_obs, reward, terminated, truncated, info = self.env.step(action)
@@ -103,6 +103,21 @@ class Trainer:
 
             # MC Update (Offline / End of Episode)
             if hasattr(self.agent, 'update_from_episode'):
+                if len(episode_data) > 0:
+                    # Who made the last move according to the env?
+                    last_actor = self.env.current_player_idx
+
+                    if last_actor != agent_player_idx:
+                        # The opponent made the final move.
+                        # Compute the final outcome *from the agent's perspective*
+                        # and add it to the last agent reward.
+                        final_outcome_for_agent = self.env._final_outcome_reward(
+                            acting_player_idx=agent_player_idx
+                        )
+
+                        s, a, r = episode_data[-1]
+                        episode_data[-1] = (s, a, r + final_outcome_for_agent)
+
                 self.agent.update_from_episode(episode_data)
 
             # Decay Epsilon if applicable

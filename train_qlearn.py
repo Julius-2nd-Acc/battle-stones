@@ -40,8 +40,8 @@ def train_qlearning(
         agent=agent,
         env=env,
         model_path=model_path,
-        save_interval=100000,
-        log_interval=10000,
+        save_interval=2000,
+        log_interval=1000,
         opponent= opponent,
         randomize_player=True
     )

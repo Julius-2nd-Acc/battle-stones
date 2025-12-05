@@ -54,8 +54,8 @@ class QLearningAgent(Agent):
         Uses GREEDY masked policy (no epsilon) for inference.
         """
         if legal_actions is not None:
-            return self.greedy_action_masked(observation, legal_actions)
-        return self.greedy_action(observation)
+            return self.policy_action_masked(observation, legal_actions)
+        return self.select_action(observation)
 
     # --------- state / policy helpers --------- #
 
@@ -134,7 +134,7 @@ class QLearningAgent(Agent):
         if done:
             best_next = 0.0
         else:
-            if legal_next_actions:
+            if legal_next_actions is not None and len(legal_next_actions) > 0:
                 best_next = max(q_next[a] for a in legal_next_actions)
             else:
                 best_next = float(np.max(q_next))
