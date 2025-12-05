@@ -10,13 +10,14 @@ from algorithms.stats_recorder import StatsRecorder
 def train_reinforce(
     num_episodes: int = 5000,
     gamma: float = 0.99,
-    lr: float = 1e-3,
+    lr: float = 3e-4,  # Reduced from 1e-3 for stability
     rows: int = 3,
     cols: int = 3,
     model_path: str = "models/reinforce_agent.pth",
-    hidden_dim: int = 128
+    hidden_dim: int = 128,
+    entropy_coef: float = 0.01
 ):
-    env = SkystonesEnv(render_mode=None, capture_reward=0.5, rows=rows, cols=cols)
+    env = SkystonesEnv(render_mode=None, capture_reward=2.0, rows=rows, cols=cols)
     
     # Calculate input dimension
     # ownership (rows*cols) + board_stats (rows*cols*4) + hand_stats (2*max_slots*4)
@@ -27,7 +28,8 @@ def train_reinforce(
         input_dim=input_dim,
         gamma=gamma,
         lr=lr,
-        hidden_dim=hidden_dim
+        hidden_dim=hidden_dim,
+        entropy_coef=entropy_coef
     )
     
     # Load existing model if available
@@ -51,7 +53,7 @@ def train_reinforce(
     opponent.load(model_path)
     '''
 
-    opponent = MixAgent(env.action_space, epsilon=0.6)
+    opponent = MixAgent(env.action_space, epsilon=0.3)
     # Initialize stats recorder
     stats_recorder = StatsRecorder(save_dir="stats", model="reinforce_agent")
     
@@ -64,6 +66,8 @@ def train_reinforce(
         obs, info = env.reset()
         done = False
         total_reward = 0
+        if episode % 2000 == 0:
+            stats_recorder.save_plots()
         
         # Randomize player assignment (P0 or P1)
         # 0 = Agent is P0, 1 = Agent is P1
@@ -143,4 +147,4 @@ def train_reinforce(
     print("Loss plot saved to stats/reinforce_loss.png")
 
 if __name__ == "__main__":
-    train_reinforce(num_episodes=10000, hidden_dim=2*512, rows=3, cols=3, model_path="models/reinforce_agent_3x3.pth") 
+    train_reinforce(num_episodes=100000, hidden_dim=2*512, rows=3, cols=3, model_path="models/reinforce_agent_3x3.pth") 

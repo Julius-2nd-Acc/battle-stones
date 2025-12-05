@@ -47,10 +47,12 @@ class ReinforceAgent(Agent):
         input_dim: int,
         gamma: float = 0.99, 
         lr: float = 1e-3,
-        hidden_dim: int = 128
+        hidden_dim: int = 128,
+        entropy_coef: float = 0.01
     ):
         self.action_space = action_space
         self.gamma = gamma
+        self.entropy_coef = entropy_coef
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
@@ -59,24 +61,20 @@ class ReinforceAgent(Agent):
         
         # Storage for current episode
         self.saved_log_probs = []
+        self.saved_entropies = []
         self.saved_values = []
         self.rewards = []
         
     def _preprocess_obs(self, obs: Any) -> torch.Tensor:
         """
         Convert observation dict to a flat tensor.
+        Always uses absolute perspective (like DQN) - no perspective flipping.
         """
         ownership = obs["ownership"].flatten()
-
-        to_move = obs["to_move"]
-        if to_move == 1:
-            # Swap 1 and 2
-            ownership = np.where(ownership == 1, 2, np.where(ownership == 2, 1, ownership))
-            
         board_stats = obs["board_stats"].flatten()
         hand_stats = obs["hand_stats"].flatten()
         
-        # Concatenate
+        # Concatenate all features
         flat_obs = np.concatenate([ownership, board_stats, hand_stats])
         return torch.FloatTensor(flat_obs).to(self.device)
 
@@ -100,8 +98,9 @@ class ReinforceAgent(Agent):
         # Sample action
         action = dist.sample()
         
-        # Save log prob and value for update
+        # Save log prob, entropy, and value for update
         self.saved_log_probs.append(dist.log_prob(action))
+        self.saved_entropies.append(dist.entropy())
         self.saved_values.append(state_value)
         
         return action.item()
@@ -121,35 +120,45 @@ class ReinforceAgent(Agent):
             R = r + self.gamma * R
             returns.insert(0, R)
             
-        returns = torch.tensor(returns).to(self.device)
+        returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
         
-        # Normalize returns for stability
-        if len(returns) > 1:
-            returns = (returns - returns.mean()) / (returns.std() + 1e-9)
+        # REMOVED: Return normalization - it destroys the reward signal in two-player games
+        # where absolute values matter for distinguishing wins from losses
             
         policy_losses = []
         value_losses = []
+        entropy_losses = []
         
-        for log_prob, value, R in zip(self.saved_log_probs, self.saved_values, returns):
-            advantage = R - value.item()
+        for log_prob, entropy, value, R in zip(self.saved_log_probs, self.saved_entropies, self.saved_values, returns):
+            # CRITICAL FIX: Keep value as tensor to maintain gradients
+            advantage = R - value.squeeze()
             
-            # Policy loss: -log_prob * advantage
-            policy_losses.append(-log_prob * advantage)
+            # Policy loss: -log_prob * advantage (detach advantage for policy gradient)
+            policy_losses.append(-log_prob * advantage.detach())
             
             # Value loss: MSE(value, R)
-            # We use smooth_l1_loss (Huber loss) which is often more stable
-            value_losses.append(nn.functional.smooth_l1_loss(value, torch.tensor([R]).to(self.device)))
+            value_losses.append(nn.functional.smooth_l1_loss(value.squeeze(), R))
+            
+            # Entropy bonus for exploration
+            entropy_losses.append(-entropy)
             
         # Sum losses
-        loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
+        policy_loss = torch.stack(policy_losses).sum()
+        value_loss = torch.stack(value_losses).sum()
+        entropy_loss = torch.stack(entropy_losses).sum()
+        
+        loss = policy_loss + value_loss + self.entropy_coef * entropy_loss
         
         # Optimization step
         self.optimizer.zero_grad()
         loss.backward()
+        # Add gradient clipping for stability
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=0.5)
         self.optimizer.step()
         
         # Clear memory
         self.saved_log_probs = []
+        self.saved_entropies = []
         self.saved_values = []
         self.rewards = []
         

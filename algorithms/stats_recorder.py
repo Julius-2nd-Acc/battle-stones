@@ -64,6 +64,7 @@ class StatsRecorder:
             plt.plot(self.episodes[window_size-1:], rolling_win_rate, color='green')
         plt.xlabel('Episode')
         plt.ylabel('Win Rate')
+        plt.ylim(0, 1)
         plt.title(f'Rolling Win Rate (Window {window_size})')
         plt.grid(True)
         
