@@ -14,6 +14,9 @@ from algorithms.agent_interface import Agent
 
 from algorithms.random_agent import RandomAgent
 from algorithms.mix_agent import MixAgent
+from algorithms.function_approximation.dqn_agent import DQNAgent
+from algorithms.function_approximation.model_classes import SmallQNet
+from algorithms.game_env import SkystonesEnv
 
 def _convert_numpy_types(obj):
     """Recursively convert numpy types to native Python types for JSON serialization."""
@@ -464,10 +467,22 @@ class GameController:
 
         if control == 'mcts':
             from algorithms.mcts_agent import MCTSAgent
-            return MCTSAgent(action_space, simulations=1000), None
+            return MCTSAgent(action_space, simulations=10000), None
 
         if control == 'random':
             return RandomAgent(action_space), None
+        if control == 'dqn':
+            filename = f"dqn_{rows}x{cols}.pkl"
+            model_path = os.path.join('models', filename)
+            if os.path.exists(model_path):
+                env = SkystonesEnv()
+                agent = DQNAgent.load(model_path, env, SmallQNet, hidden_dim=128, gamma=0.99, lr=1e-3)
+                self.logger.info(f"Loaded DQNAgent from {model_path}")
+                return agent, model_path
+            else:
+                raise FileNotFoundError(f"DQN agent model not found at {model_path}")
+
+
 
         raise ValueError(f"Unknown agent type: {control}")
 
