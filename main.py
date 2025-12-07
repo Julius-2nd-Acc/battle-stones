@@ -278,8 +278,7 @@ def run_mc_vs_q(num_episodes=50, render=False):
 
 def run_qnet_vs_random(num_episodes=50, render=False):
     env = SkystonesEnv(render_mode="human" if render else None, capture_reward=1.0)
-    qnet_agent = FunctionApproximationAgent.load(filepath='models/dqn.pkl', env=env, model_cls=SmallQNet, hidden_dim=128)
-
+    qnet_agent = FunctionApproximationAgent.load(filepath='models/dqn_3x3.pkl', env=env, model_cls=SmallQNet, hidden_dim=256)
     wins_p0 = 0
     wins_p1 = 0
     draws = 0
