@@ -251,19 +251,19 @@ class SkystonesEnv(gym.Env):
         winners = [p for p, c in owner_counts.items() if c == max_count]
 
         if len(winners) != 1:
-            return 0.0
+            return -6.0
 
         winner = winners[0]
         acting_player = self.game.players[acting_player_idx]
         
         if winner == acting_player:
-            return 3.0
+            return 6.0
         else:
-            return -3.0
+            return -6.0
 
     def _terminal_reward(self, acting_player_idx: int) -> float:
         """
         Reward when the acting player plays an illegal move.
         Always -1.0 because the acting player loses.
         """
-        return -1.0
+        return -6.0

@@ -9,15 +9,15 @@ def train(
     model_cls,
     hidden_dim=128,
     gamma=0.8,
-    lr=1e-3,
+    lr=1e-4,
     epsilon=0.99,
-    epsilon_min=0.05,
-    epsilon_decay=0.9,
+    epsilon_min=0.01,
+    epsilon_decay=0.999,
     model_path='models/dqn.pkl',
-    target_update_freq=1000,
+    target_update_freq=2000,
     model_kwargs=None   
 ):
-    env = SkystonesEnv()
+    env = SkystonesEnv(capture_reward=2.0)
 
     
     opponent = MixAgent(action_space=env.action_space, epsilon=0.4)
@@ -32,6 +32,10 @@ def train(
         epsilon=epsilon,
         epsilon_min=epsilon_min,
         epsilon_decay=epsilon_decay,
+        replay_capacity=100000,
+        batch_size=128,
+        warmup_steps=2000,
+        updates_per_step=2,
         target_update_freq=target_update_freq)
     else:
         print("Starting fresh training...")
@@ -53,12 +57,12 @@ def train(
         opponent=opponent,
         env=env,
         model_path=model_path,
-        save_interval=2000,
-        log_interval=1000,
+        save_interval=10000,
+        log_interval=5000,
         randomize_player=True
     )
 
-    trainer.train(num_episodes=20000)
+    trainer.train(num_episodes=100000)
 
 if __name__ == '__main__':
     train(SmallQNet, hidden_dim=256, model_path='models/dqn_3x3.pkl')
